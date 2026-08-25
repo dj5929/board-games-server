@@ -156,6 +156,7 @@ export function GameRoom({ roomId, localPlayerIds, onLeave }: Props) {
     };
   }, [roomId, localPlayerIds]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (state && localPlayerIds.includes(state.players[state.currentPlayerIndex].id)) {
       SoundEngine.playTurnChime();

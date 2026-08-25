@@ -1,6 +1,6 @@
 # Universal Multiplayer Board Game Platform (Agent Rules)
 
-**Current Focus:** Multi-Game Architecture & Catan Core (Phase 13)
+**Current Focus:** Catan Awards, Win Condition & Polish (Phase 18)
 **Tracker:** See [PROJECT_TRACKER.md](./PROJECT_TRACKER.md) for roadmap and status.
 **Fixes:** See [FIXES.md](./FIXES.md) for identified issues, planned improvements, and implementation diffs.
 

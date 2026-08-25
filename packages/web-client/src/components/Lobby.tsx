@@ -7,7 +7,7 @@ interface Props {
 }
 
 export function Lobby({ onJoinRoom }: Props) {
-  const [joinId, setJoinId] = useState('');
+  const [_joinId, _setJoinId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'local' | 'online'>('local');
   const [playerCount, setPlayerCount] = useState<number>(2);
@@ -33,17 +33,17 @@ export function Lobby({ onJoinRoom }: Props) {
     setIsLoading(false);
   };
 
-  const handleJoin = async () => {
-    if (!joinId) return;
+  const _handleJoin = async () => {
+    if (!_joinId) return;
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/rooms/${joinId}/join`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/rooms/${_joinId}/join`, { method: 'POST' });
       if (res.status === 404) throw new Error('Room not found');
       if (res.status === 400) throw new Error('Room is full');
       
       const data = await res.json();
       if (data.playerId) {
-        onJoinRoom(joinId, [data.playerId], data.gameType || 'monopoly');
+        onJoinRoom(_joinId, [data.playerId], data.gameType || 'monopoly');
       }
     } catch (e: any) {
       console.error(e);

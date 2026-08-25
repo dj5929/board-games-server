@@ -34,11 +34,21 @@ export interface ICatanTradeOffer {
   request: Record<Exclude<ResourceType, 'DESERT'>, number>;
 }
 
+export type DevCardType = 'KNIGHT' | 'VICTORY_POINT' | 'ROAD_BUILDING' | 'YEAR_OF_PLENTY' | 'MONOPOLY';
+
+export interface IDevCard {
+  id: string;
+  type: DevCardType;
+  boughtThisTurn: boolean;
+}
+
 export interface CatanPlayer {
   id: PlayerId;
   resources: Record<Exclude<ResourceType, 'DESERT'>, number>;
   victoryPoints: number;
   color: string;
+  developmentCards: IDevCard[];
+  playedDevelopmentCards: DevCardType[];
 }
 
 export interface ICatanState extends IGameState {
@@ -48,7 +58,9 @@ export interface ICatanState extends IGameState {
     readonly vertices: Readonly<Record<string, Vertex>>;
     readonly edges: Readonly<Record<string, Edge>>;
   };
-  readonly turnPhase: 'INITIAL_PLACEMENT_1' | 'INITIAL_PLACEMENT_2' | 'MAIN_TURN' | 'ROBBER_PLACEMENT';
+  readonly turnPhase: 'INITIAL_PLACEMENT_1' | 'INITIAL_PLACEMENT_2' | 'MAIN_TURN' | 'DISCARD_PHASE' | 'ROBBER_PLACEMENT';
+  readonly pendingDiscards: Readonly<Record<PlayerId, number>>;
+  readonly devCardDeck: readonly DevCardType[];
   readonly activePlayerId: PlayerId | null;
   readonly activeTrade: ICatanTradeOffer | null;
 }
@@ -56,6 +68,15 @@ export interface ICatanState extends IGameState {
 export type ICatanAction = IPlayerAction & (
   | { type: 'ROLL_DICE' }
   | { type: 'END_TURN' }
+  // Robber & Discard mechanics
+  | { type: 'DISCARD_RESOURCES'; resources: Record<Exclude<ResourceType, 'DESERT'>, number> }
+  | { type: 'MOVE_ROBBER'; hexId: string; targetPlayerId?: PlayerId }
+  // Dev Cards
+  | { type: 'BUY_DEV_CARD' }
+  | { type: 'PLAY_KNIGHT'; hexId: string; targetPlayerId?: PlayerId }
+  | { type: 'PLAY_YEAR_OF_PLENTY'; resource1: Exclude<ResourceType, 'DESERT'>; resource2: Exclude<ResourceType, 'DESERT'> }
+  | { type: 'PLAY_MONOPOLY'; resource: Exclude<ResourceType, 'DESERT'> }
+  | { type: 'PLAY_ROAD_BUILDING'; edgeId1: string; edgeId2?: string }
   // Placeholder actions for initial placement
   | { type: 'PLACE_INITIAL_SETTLEMENT'; vertexId: string }
   | { type: 'PLACE_INITIAL_ROAD'; edgeId: string }
@@ -74,6 +95,11 @@ export type ICatanAction = IPlayerAction & (
 export type ICatanEvent = IGameEvent & (
   | { type: 'DICE_ROLLED'; dice1: number; dice2: number; total: number }
   | { type: 'TURN_ENDED'; nextPlayerId: PlayerId }
+  | { type: 'RESOURCES_DISCARDED'; playerId: PlayerId; amount: number }
+  | { type: 'ROBBER_MOVED'; playerId: PlayerId; hexId: string }
+  | { type: 'STOLEN_RESOURCE'; thiefId: PlayerId; victimId: PlayerId; resource: Exclude<ResourceType, 'DESERT'> }
+  | { type: 'DEV_CARD_BOUGHT'; playerId: PlayerId }
+  | { type: 'DEV_CARD_PLAYED'; playerId: PlayerId; cardType: DevCardType }
   | { type: 'SETTLEMENT_BUILT'; playerId: PlayerId; vertexId: string }
   | { type: 'ROAD_BUILT'; playerId: PlayerId; edgeId: string }
   | { type: 'CITY_UPGRADED'; playerId: PlayerId; vertexId: string }

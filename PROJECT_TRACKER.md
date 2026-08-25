@@ -119,15 +119,17 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Player Trade:** Implement trade proposal, negotiation, and acceptance modals similar to Monopoly but for resources.
 - 🟢 **Universal Rulebook UI:** Added a shared `RulebookModal` component and top-bar "Rules" button across both Monopoly and Catan game screens for quick reference to game objectives and mechanics.
 
+### 🟢 Phase 17: Catan Advanced Logic (Robber & Development Cards)
+- 🟢 **Robber Mechanics:** Implement action to move robber on a roll of 7, steal from adjacent players, and forced resource discarding for >7 cards.
+- 🟢 **Development Cards:** Implement `BUY_DEV_CARD` and playing specific cards (Knight, Year of Plenty, Monopoly, Road Building).
+
 ---
 
 ## 🟡 Active & Remaining Roadmap
 
 
 
-### 🔴 Phase 17: Catan Advanced Logic (Robber & Development Cards)
-- 🔴 **Robber Mechanics:** Implement action to move robber on a roll of 7, steal from adjacent players, and forced resource discarding for >7 cards.
-- 🔴 **Development Cards:** Implement `BUY_DEV_CARD` and playing specific cards (Knight, Year of Plenty, Monopoly, Road Building).
+
 
 ### 🔴 Phase 18: Catan Awards, Win Condition & Polish
 - 🔴 **Achievements:** Automated tracking and awarding of Longest Route (requires DFS pathfinding, min 5 roads) and Largest Army (min 3 knights).

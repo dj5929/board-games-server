@@ -7,6 +7,7 @@ interface Props {
   buildMode: 'SETTLEMENT' | 'ROAD' | 'CITY' | null;
   onVertexClick: (vertexId: string) => void;
   onEdgeClick: (edgeId: string) => void;
+  onHexClick?: (hexId: string) => void;
   children?: React.ReactNode;
 }
 
@@ -40,7 +41,7 @@ function getCoordsFromId(id: string) {
   return { x, y, hexes };
 }
 
-function HexPolygon({ hex }: { hex: Hex }) {
+function HexPolygon({ hex, onClick, isClickable }: { hex: Hex, onClick?: () => void, isClickable?: boolean }) {
   const { x, y } = getHexCoordinates(hex.q, hex.r);
   const points = Array.from({ length: 6 }).map((_, i) => {
     const angle_deg = 60 * i - 30;
@@ -49,13 +50,13 @@ function HexPolygon({ hex }: { hex: Hex }) {
   }).join(' ');
 
   return (
-    <g className="hover:opacity-90 transition-opacity group">
+    <g className={`hover:opacity-90 transition-opacity group ${isClickable ? 'cursor-pointer' : ''}`} onClick={isClickable ? onClick : undefined}>
       <polygon 
         points={points} 
         fill={RESOURCE_COLORS[hex.resource]} 
-        stroke="#1f2937" 
-        strokeWidth="2"
-        className="drop-shadow-sm"
+        stroke={isClickable ? "#fbbf24" : "#1f2937"} 
+        strokeWidth={isClickable ? "4" : "2"}
+        className={`drop-shadow-sm ${isClickable ? 'animate-pulse' : ''}`}
       />
       {hex.numberToken && (
         <g transform={`translate(${x}, ${y})`}>
@@ -143,7 +144,7 @@ function EdgeNode({ edge, colors, buildMode, onClick }: { edge: Edge, colors: Re
   );
 }
 
-export function CatanBoard({ state, playerId, buildMode, onVertexClick, onEdgeClick, children }: Props) {
+export function CatanBoard({ state, playerId: _playerId, buildMode, onVertexClick, onEdgeClick, onHexClick, children }: Props) {
   if (!state) return null;
   const playerColors = Object.fromEntries(state.players.map(p => [p.id, p.color]));
 
@@ -154,7 +155,14 @@ export function CatanBoard({ state, playerId, buildMode, onVertexClick, onEdgeCl
           <rect width="100%" height="100%" fill="#38bdf8" rx="24" opacity="0.3" />
           
           <g id="hexes">
-            {state.board.hexes.map(hex => <HexPolygon key={hex.id} hex={hex} />)}
+            {state.board.hexes.map(hex => (
+              <HexPolygon 
+                key={hex.id} 
+                hex={hex} 
+                onClick={onHexClick ? () => onHexClick(hex.id) : undefined} 
+                isClickable={!!onHexClick && !hex.hasRobber} 
+              />
+            ))}
           </g>
           
           <g id="edges">

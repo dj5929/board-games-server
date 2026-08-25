@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ICatanState, ICatanTradeOffer, ResourceType, PlayerId } from '@packages/catan-engine';
+import { ICatanState, ResourceType, PlayerId } from '@packages/catan-engine';
 
 interface Props {
   state: ICatanState;

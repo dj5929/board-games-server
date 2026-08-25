@@ -13,7 +13,7 @@ The platform is designed around strict, immutable, pure functional state machine
 ### Packages
 - `@packages/engine-core`: Shared interfaces (`IGameEngine`, `IGameState`, `IPlayerAction`) defining the pure state machine boundaries.
 - `@packages/monopoly-engine`: Complete Monopoly ruleset with property management, trading, dice logic, jail rules, bankruptcy, and Chance/Community chest cards.
-- `@packages/catan-engine`: (In Progress) Resource management, hex grid coordinate systems, building, and maritime trade.
+- `@packages/catan-engine`: (In Progress) Resource management, hex grid coordinate systems, building, maritime trade, robber mechanics, and development cards.
 - `@packages/server`: A Fastify + WebSocket (`@fastify/websocket`) server with robust Zod validation for room and game state synchronization.
 - `@packages/web-client`: The frontend React application built with Vite and Tailwind CSS. Features highly interactive UIs, smooth CSS animations, floating event logs, Web Audio API sound effects, and robust optimistic state updates.
 

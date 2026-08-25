@@ -5,6 +5,9 @@ import { CatanBoard } from './CatanBoard';
 import { SoundEngine } from '../utils/SoundEngine';
 import { Dice3D } from './Dice3D';
 import { RulebookModal } from './RulebookModal';
+import { CatanDiscardModal } from './CatanDiscardModal';
+import { CatanRobberVictimModal } from './CatanRobberVictimModal';
+import { CatanDevCardManager } from './CatanDevCardManager';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -31,6 +34,11 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
   const [buildMode, setBuildMode] = useState<'SETTLEMENT' | 'ROAD' | 'CITY' | null>(null);
   const [showTradeManager, setShowTradeManager] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [showDevCardManager, setShowDevCardManager] = useState(false);
+  const [robberHexId, setRobberHexId] = useState<string | null>(null);
+  const [isPlayingKnight, setIsPlayingKnight] = useState(false);
+  const [isPlayingRoadBuilding, setIsPlayingRoadBuilding] = useState(false);
+  const [roadBuildingEdges, setRoadBuildingEdges] = useState<string[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
   const addToast = (msg: string) => {
@@ -69,7 +77,7 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
           } else if (ev.type === 'CITY_UPGRADED') {
             msg = `City upgraded by ${ev.playerId}`;
           } else if (ev.type === 'RESOURCES_RECEIVED') {
-            msg = `${ev.playerId} received resources: ${Object.entries(ev.resources).filter(([_,v]:any) => v > 0).map(([k,v]) => `${v} ${k}`).join(', ')}`;
+            msg = `${ev.playerId} received resources: ${Object.entries(ev.resources).filter(([,v]:any) => v > 0).map(([k,v]) => `${v} ${k}`).join(', ')}`;
           } else if (ev.type === 'BANK_TRADE') {
             msg = `${ev.playerId} traded ${ev.cost} ${ev.offerResource} for ${ev.amount} ${ev.requestResource} with Bank.`;
           } else if (ev.type === 'TRADE_PROPOSED') {
@@ -136,9 +144,61 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
 
   const handleEdgeClick = (edgeId: string) => {
     if (!isMyTurn) return;
+    if (isPlayingRoadBuilding) {
+      const newEdges = [...roadBuildingEdges, edgeId];
+      if (newEdges.length === 2) {
+        wsRef.current?.send(JSON.stringify({ type: 'PLAY_ROAD_BUILDING', playerId: activePlayerId, edgeId1: newEdges[0], edgeId2: newEdges[1] }));
+        setIsPlayingRoadBuilding(false);
+        setRoadBuildingEdges([]);
+      } else {
+        setRoadBuildingEdges(newEdges);
+        addToast("Select one more road to build.");
+      }
+      return;
+    }
     if (buildMode === 'ROAD') {
       wsRef.current?.send(JSON.stringify({ type: 'BUILD_ROAD', playerId: activePlayerId, edgeId }));
     }
+  };
+
+  const handleHexClick = (hexId: string) => {
+    if (!isMyTurn) return;
+    if (state?.turnPhase !== 'ROBBER_PLACEMENT' && !isPlayingKnight) return;
+    const hex = state.board.hexes.find(h => h.id === hexId);
+    if (!hex || hex.hasRobber) return;
+    setRobberHexId(hexId);
+  };
+
+  const handleMoveRobberOrKnight = (targetPlayerId?: string) => {
+    if (!robberHexId) return;
+    if (isPlayingKnight) {
+      wsRef.current?.send(JSON.stringify({ type: 'PLAY_KNIGHT', playerId: activePlayerId, hexId: robberHexId, targetPlayerId }));
+      setIsPlayingKnight(false);
+    } else {
+      wsRef.current?.send(JSON.stringify({ type: 'MOVE_ROBBER', playerId: activePlayerId, hexId: robberHexId, targetPlayerId }));
+    }
+    setRobberHexId(null);
+  };
+
+  const cancelRobberOrKnight = () => {
+    setRobberHexId(null);
+    if (isPlayingKnight) setIsPlayingKnight(false);
+  };
+
+  const handleDiscard = (resources: Record<Exclude<ResourceType, 'DESERT'>, number>) => {
+    wsRef.current?.send(JSON.stringify({ type: 'DISCARD_RESOURCES', playerId: localPlayerIds[0], resources }));
+  };
+
+  const handleBuyDevCard = () => {
+    wsRef.current?.send(JSON.stringify({ type: 'BUY_DEV_CARD', playerId: activePlayerId }));
+  };
+
+  const handlePlayYearOfPlenty = (res1: any, res2: any) => {
+    wsRef.current?.send(JSON.stringify({ type: 'PLAY_YEAR_OF_PLENTY', playerId: activePlayerId, resource1: res1, resource2: res2 }));
+  };
+
+  const handlePlayMonopoly = (res: any) => {
+    wsRef.current?.send(JSON.stringify({ type: 'PLAY_MONOPOLY', playerId: activePlayerId, resource: res }));
   };
 
   const handleTradeBank = (offerResource: ResourceType, requestResource: ResourceType, amount: number) => {
@@ -177,10 +237,65 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
   const activePlayer = state.players.find(p => p.id === activePlayerId);
   const me = state.players.find(p => p.id === localPlayerIds[0]);
 
+  // Compute victims for Robber Victim Modal
+  let robberVictims: CatanPlayer[] = [];
+  if (robberHexId) {
+    const adjacentVertexIds = Object.keys(state.board.vertices).filter(vId => {
+      // Very naive logic to get adjacent vertices: in Catan engine, board graph isn't easily accessible here
+      // Wait, we can't access boardGraph from UI. 
+      // Instead, we can just look at all vertices whose ID contains the hex Q and R coordinates.
+      // But the engine validates it anyway. For UI, let's just show players who have ANY building and are not the active player, 
+      // or we can parse the vertex ID. In Catan, vertex ID is something like `q,r|q,r|q,r`.
+      return vId.includes(robberHexId);
+    });
+    const adjacentOwners = new Set<string>();
+    adjacentVertexIds.forEach(vId => {
+      const v = state.board.vertices[vId];
+      if (v?.building && v.owner && v.owner !== activePlayerId) {
+        adjacentOwners.add(v.owner);
+      }
+    });
+    robberVictims = state.players.filter(p => 
+      adjacentOwners.has(p.id) && Object.values(p.resources).reduce((a, b) => a + b, 0) > 0
+    );
+  }
+
+  // Check if I need to discard
+  const myPendingDiscards = state.turnPhase === 'DISCARD_PHASE' ? (state.pendingDiscards[me?.id || ''] || 0) : 0;
+
   return (
     <div className="w-full max-w-7xl mx-auto flex flex-col gap-6 relative p-2 md:p-4">
       {isAnimating && <div className="fixed inset-0 z-[60] bg-transparent pointer-events-auto cursor-wait" />}
       
+      {myPendingDiscards > 0 && me && (
+        <CatanDiscardModal 
+          requiredAmount={myPendingDiscards} 
+          resources={me.resources} 
+          onSubmit={handleDiscard} 
+        />
+      )}
+
+      {robberHexId && (
+        <CatanRobberVictimModal 
+          victims={robberVictims} 
+          onSelect={(victimId) => handleMoveRobberOrKnight(victimId)} 
+          onCancel={cancelRobberOrKnight} 
+        />
+      )}
+      
+      {showDevCardManager && state && me && (
+        <CatanDevCardManager 
+          state={state}
+          playerId={me.id}
+          onBuyCard={handleBuyDevCard}
+          onPlayKnight={() => { setIsPlayingKnight(true); addToast("Select a hex to move the robber to."); }}
+          onPlayYearOfPlenty={handlePlayYearOfPlenty}
+          onPlayMonopoly={handlePlayMonopoly}
+          onPlayRoadBuilding={() => { setIsPlayingRoadBuilding(true); addToast("Select 2 edges to build roads."); }}
+          onClose={() => setShowDevCardManager(false)}
+        />
+      )}
+
       {showRules && (
         <RulebookModal game="CATAN" onClose={() => setShowRules(false)} />
       )}
@@ -251,7 +366,7 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
         </div>
       )}
 
-      <CatanBoard state={state} playerId={activePlayerId} buildMode={buildMode} onVertexClick={handleVertexClick} onEdgeClick={handleEdgeClick}>
+      <CatanBoard state={state} playerId={activePlayerId} buildMode={buildMode} onVertexClick={handleVertexClick} onEdgeClick={handleEdgeClick} onHexClick={handleHexClick}>
         <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 shadow-xl flex flex-col gap-6">
           <div className="text-center">
             <h3 className="text-2xl font-black text-white uppercase tracking-widest mb-2" style={{ color: activePlayer?.color }}>
@@ -296,6 +411,12 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
                   className={`w-full font-bold py-2 px-4 rounded-xl transition-all shadow-md text-sm border-2 bg-blue-600 border-blue-400 text-white hover:bg-blue-500`}
                 >
                   Trade Resources
+                </button>
+                <button 
+                  onClick={() => setShowDevCardManager(true)}
+                  className={`w-full font-bold py-2 px-4 rounded-xl transition-all shadow-md text-sm border-2 bg-purple-600 border-purple-400 text-white hover:bg-purple-500`}
+                >
+                  Development Cards
                 </button>
               </>
             )}
