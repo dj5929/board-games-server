@@ -1,0 +1,9 @@
+{
+  "name": "@packages/catan-engine",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@packages/engine-core": "*",
+    "zod": "^3.22.4"
+  }
+}
