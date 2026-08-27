@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ICatanState, ResourceType, PlayerId } from '@packages/catan-engine';
+import { boardGraph, type ICatanState, type ResourceType } from '@packages/catan-engine';
+import type { PlayerId } from '@packages/engine-core';
 
 interface Props {
   state: ICatanState;
@@ -51,8 +52,8 @@ export function CatanTradeManager({ state, playerId, onTradeBank, onProposeTrade
     let bestRate = 4;
     Object.values(state.board.vertices).forEach(vertex => {
       if (vertex.owner === playerId && vertex.building) {
-        const edges = state.board.vertices[vertex.id]?.adjacentEdges || [];
-        edges.forEach(eId => {
+        const edges = boardGraph.vertices[vertex.id]?.adjacentEdges || [];
+        edges.forEach((eId: string) => {
           const port = state.board.edges[eId]?.port;
           if (port === '3:1') bestRate = Math.min(bestRate, 3);
           if (port === resource) bestRate = Math.min(bestRate, 2);

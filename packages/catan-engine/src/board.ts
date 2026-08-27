@@ -1,5 +1,5 @@
-import { IRandomProvider, shuffleArray } from '@packages/engine-core';
-import { Hex, Vertex, Edge, ResourceType, PortType } from './types';
+import { shuffleArray, type IRandomProvider } from '@packages/engine-core';
+import type { Hex, Vertex, Edge, ResourceType, PortType } from './types';
 
 // Standard Catan board has 19 hexes
 // Resources: 4 Wood, 4 Sheep, 4 Wheat, 3 Brick, 3 Ore, 1 Desert

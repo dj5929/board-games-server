@@ -1,0 +1,135 @@
+diff --git a/packages/web-client/src/components/CatanRoom.tsx b/packages/web-client/src/components/CatanRoom.tsx
+index aca9de2..d44ac98 100644
+--- a/packages/web-client/src/components/CatanRoom.tsx
++++ b/packages/web-client/src/components/CatanRoom.tsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useState, useRef } from 'react';
+-import type { ICatanState, ResourceType, PlayerId } from '@packages/catan-engine';
++import type { ICatanState, ResourceType, CatanPlayer } from '@packages/catan-engine';
++import type { PlayerId } from '@packages/engine-core';
+ import { CatanTradeManager } from './CatanTradeManager';
+ import { CatanBoard } from './CatanBoard';
+ import { SoundEngine } from '../utils/SoundEngine';
+@@ -94,6 +95,27 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
+           } else if (ev.type === 'TRADE_CANCELLED') {
+             msg = `Trade cancelled.`;
+             setShowTradeManager(false);
++          } else if (ev.type === 'GAME_OVER') {
++            msg = `${ev.winnerId} has won the game!`;
++            SoundEngine.playVictorySound();
++          } else if (ev.type === 'LONGEST_ROAD_AWARDED') {
++            msg = `${ev.playerId} now has the Longest Road (${ev.length} roads)!`;
++          } else if (ev.type === 'LARGEST_ARMY_AWARDED') {
++            msg = `${ev.playerId} now has the Largest Army (${ev.size} knights)!`;
++          } else if (ev.type === 'RESOURCES_DISCARDED') {
++            msg = `${ev.playerId} discarded ${ev.amount} resources.`;
++          } else if (ev.type === 'ROBBER_MOVED') {
++            msg = `${ev.playerId} moved the Robber!`;
++          } else if (ev.type === 'STOLEN_RESOURCE') {
++            msg = `${ev.thiefId} stole a resource from ${ev.victimId}.`;
++          } else if (ev.type === 'DEV_CARD_BOUGHT') {
++            msg = `${ev.playerId} bought a Development Card.`;
++          } else if (ev.type === 'DEV_CARD_PLAYED') {
++            msg = `${ev.playerId} played a ${ev.cardType.replace(/_/g, ' ')} card.`;
++          }
++          
++          if (['SETTLEMENT_BUILT', 'ROAD_BUILT', 'CITY_UPGRADED'].includes(ev.type)) {
++            SoundEngine.playCatanBuild();
+           }
+           
+           if (msg) {
+@@ -162,8 +184,8 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
+   };
+ 
+   const handleHexClick = (hexId: string) => {
+-    if (!isMyTurn) return;
+-    if (state?.turnPhase !== 'ROBBER_PLACEMENT' && !isPlayingKnight) return;
++    if (!isMyTurn || !state) return;
++    if (state.turnPhase !== 'ROBBER_PLACEMENT' && !isPlayingKnight) return;
+     const hex = state.board.hexes.find(h => h.id === hexId);
+     if (!hex || hex.hasRobber) return;
+     setRobberHexId(hexId);
+@@ -261,7 +283,7 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
+   }
+ 
+   // Check if I need to discard
+-  const myPendingDiscards = state.turnPhase === 'DISCARD_PHASE' ? (state.pendingDiscards[me?.id || ''] || 0) : 0;
++  const myPendingDiscards = state.turnPhase === 'DISCARD_PHASE' ? (me ? (state.pendingDiscards[me.id] || 0) : 0) : 0;
+ 
+   return (
+     <div className="w-full max-w-7xl mx-auto flex flex-col gap-6 relative p-2 md:p-4">
+@@ -384,6 +406,23 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
+              <div className="flex justify-between text-yellow-400"><span className="text-yellow-600">VP:</span><span className="font-bold">{me?.victoryPoints}</span></div>
+           </div>
+ 
++          {(state.longestRoadOwner === me?.id || state.largestArmyOwner === me?.id) && (
++            <div className="flex flex-col gap-2 -mt-3 mb-1">
++              {state.longestRoadOwner === me?.id && (
++                <div className="px-3 py-1 bg-amber-900/50 text-amber-200 text-xs font-bold rounded-lg border border-amber-600 shadow-inner flex justify-between animate-fade-in">
++                  <span>🏆 Longest Road</span>
++                  <span>{state.longestRoadLength} roads</span>
++                </div>
++              )}
++              {state.largestArmyOwner === me?.id && (
++                <div className="px-3 py-1 bg-rose-900/50 text-rose-200 text-xs font-bold rounded-lg border border-rose-600 shadow-inner flex justify-between animate-fade-in">
++                  <span>⚔️ Largest Army</span>
++                  <span>{state.largestArmySize} knights</span>
++                </div>
++              )}
++            </div>
++          )}
++
+           <div className="flex flex-col gap-3">
+             {isMyTurn && (
+               <>
+@@ -422,6 +461,22 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
+             )}
+ 
+             <div className="text-xs text-gray-400 uppercase tracking-widest mt-4">Turn Actions</div>
++            {isPlayingRoadBuilding && (
++               <div className="flex flex-col gap-2 mb-2">
++                 <button 
++                   onClick={() => {
++                     if (roadBuildingEdges.length === 1) {
++                       wsRef.current?.send(JSON.stringify({ type: 'PLAY_ROAD_BUILDING', playerId: activePlayerId, edgeId1: roadBuildingEdges[0] }));
++                     }
++                     setIsPlayingRoadBuilding(false);
++                     setRoadBuildingEdges([]);
++                   }}
++                   className="w-full font-bold py-2 px-4 rounded-xl transition-all shadow-md text-sm border-2 bg-red-600 border-red-400 text-white hover:bg-red-500"
++                 >
++                   {roadBuildingEdges.length === 1 ? 'Finish (Build 1 Road)' : 'Cancel Road Building'}
++                 </button>
++               </div>
++            )}
+             <button 
+               onClick={handleRollDice} 
+               disabled={!isMyTurn}
+@@ -439,6 +494,27 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
+           </div>
+         </div>
+       </CatanBoard>
++
++      {state.winner && (
++        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center animate-fade-in">
++          <div className="bg-gray-900 border-2 border-yellow-500 rounded-3xl p-8 max-w-lg w-full text-center shadow-[0_0_50px_rgba(234,179,8,0.3)]">
++            <h2 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br from-yellow-300 to-yellow-600 mb-4 animate-pulse">
++              VICTORY!
++            </h2>
++            <p className="text-2xl text-white mb-8">
++              <span className="font-bold" style={{ color: state.players.find(p => p.id === state.winner)?.color }}>
++                {state.winner}
++              </span> has won the game with 10 Victory Points!
++            </p>
++            <button 
++              onClick={onLeave} 
++              className="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-transform hover:scale-105 active:scale-95"
++            >
++              Return to Lobby
++            </button>
++          </div>
++        </div>
++      )}
+     </div>
+   );
+ }

@@ -1,0 +1,137 @@
+diff --git a/packages/engine-core/src/utils.ts b/packages/engine-core/src/utils.ts
+index b80935e..7ac011f 100644
+--- a/packages/engine-core/src/utils.ts
++++ b/packages/engine-core/src/utils.ts
+@@ -1,4 +1,4 @@
+-import { IRandomProvider } from './types';
++import type { IRandomProvider } from './types';
+ 
+ /**
+  * Fisher-Yates shuffle: returns a new shuffled copy of the array.
+diff --git a/packages/server/src/schemas.ts b/packages/server/src/schemas.ts
+index c53655c..86981be 100644
+--- a/packages/server/src/schemas.ts
++++ b/packages/server/src/schemas.ts
+@@ -21,10 +21,12 @@ export const actionSchema = z.discriminatedUnion('type', [
+   z.object({
+     ...baseAction, type: z.literal('PROPOSE_TRADE'),
+     toPlayerId: z.string(),
+-    offeredProperties: z.array(z.string()),
+-    requestedProperties: z.array(z.string()),
+-    offeredMoney: z.number(),
+-    requestedMoney: z.number()
++    offeredProperties: z.array(z.string()).optional(),
++    requestedProperties: z.array(z.string()).optional(),
++    offeredMoney: z.number().optional(),
++    requestedMoney: z.number().optional(),
++    offer: z.record(z.number()).optional(),
++    request: z.record(z.number()).optional(),
+   }),
+   // Catan actions
+   z.object({ ...baseAction, type: z.literal('BUILD_SETTLEMENT'), vertexId: z.string() }),
+@@ -33,4 +35,13 @@ export const actionSchema = z.discriminatedUnion('type', [
+   // Catan initial placement actions
+   z.object({ ...baseAction, type: z.literal('PLACE_INITIAL_SETTLEMENT'), vertexId: z.string() }),
+   z.object({ ...baseAction, type: z.literal('PLACE_INITIAL_ROAD'), edgeId: z.string() }),
++  // Additional Catan actions
++  z.object({ ...baseAction, type: z.literal('DISCARD_RESOURCES'), resources: z.record(z.number()) }),
++  z.object({ ...baseAction, type: z.literal('MOVE_ROBBER'), hexId: z.string(), targetPlayerId: z.string().optional() }),
++  z.object({ ...baseAction, type: z.literal('BUY_DEV_CARD') }),
++  z.object({ ...baseAction, type: z.literal('PLAY_KNIGHT'), hexId: z.string(), targetPlayerId: z.string().optional() }),
++  z.object({ ...baseAction, type: z.literal('PLAY_YEAR_OF_PLENTY'), resource1: z.string(), resource2: z.string() }),
++  z.object({ ...baseAction, type: z.literal('PLAY_MONOPOLY'), resource: z.string() }),
++  z.object({ ...baseAction, type: z.literal('PLAY_ROAD_BUILDING'), edgeId1: z.string(), edgeId2: z.string().optional() }),
++  z.object({ ...baseAction, type: z.literal('TRADE_BANK'), offerResource: z.string(), requestResource: z.string(), amount: z.number() }),
+ ]);
+diff --git a/packages/web-client/src/components/CatanTradeManager.tsx b/packages/web-client/src/components/CatanTradeManager.tsx
+index 4437a7f..ac370f1 100644
+--- a/packages/web-client/src/components/CatanTradeManager.tsx
++++ b/packages/web-client/src/components/CatanTradeManager.tsx
+@@ -1,5 +1,6 @@
+ import React, { useState } from 'react';
+-import { ICatanState, ResourceType, PlayerId } from '@packages/catan-engine';
++import { boardGraph, type ICatanState, type ResourceType } from '@packages/catan-engine';
++import type { PlayerId } from '@packages/engine-core';
+ 
+ interface Props {
+   state: ICatanState;
+@@ -51,8 +52,8 @@ export function CatanTradeManager({ state, playerId, onTradeBank, onProposeTrade
+     let bestRate = 4;
+     Object.values(state.board.vertices).forEach(vertex => {
+       if (vertex.owner === playerId && vertex.building) {
+-        const edges = state.board.vertices[vertex.id]?.adjacentEdges || [];
+-        edges.forEach(eId => {
++        const edges = boardGraph.vertices[vertex.id]?.adjacentEdges || [];
++        edges.forEach((eId: string) => {
+           const port = state.board.edges[eId]?.port;
+           if (port === '3:1') bestRate = Math.min(bestRate, 3);
+           if (port === resource) bestRate = Math.min(bestRate, 2);
+diff --git a/packages/web-client/src/utils/SoundEngine.ts b/packages/web-client/src/utils/SoundEngine.ts
+index 94a8eeb..8e58905 100644
+--- a/packages/web-client/src/utils/SoundEngine.ts
++++ b/packages/web-client/src/utils/SoundEngine.ts
+@@ -140,6 +140,64 @@ class SoundEngineImpl {
+     osc.start(t);
+     osc.stop(t + 1.1);
+   }
++  public playCatanBuild() {
++    if (!this.isEnabled) return;
++    const ctx = this.getContext();
++    const t = ctx.currentTime;
++    
++    const osc = ctx.createOscillator();
++    const gainNode = ctx.createGain();
++
++    osc.type = 'triangle';
++    
++    osc.frequency.setValueAtTime(200, t);
++    osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
++
++    gainNode.gain.setValueAtTime(0, t);
++    gainNode.gain.linearRampToValueAtTime(0.4, t + 0.02);
++    gainNode.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
++
++    osc.connect(gainNode);
++    gainNode.connect(ctx.destination);
++
++    osc.start(t);
++    osc.stop(t + 0.2);
++  }
++
++  public playVictorySound() {
++    if (!this.isEnabled) return;
++    const ctx = this.getContext();
++    const t = ctx.currentTime;
++    
++    // Trumpet-like fanfare
++    const notes = [
++      { f: 523.25, d: 0.15 }, // C5
++      { f: 523.25, d: 0.15 }, // C5
++      { f: 523.25, d: 0.15 }, // C5
++      { f: 659.25, d: 0.4 },  // E5
++    ];
++    
++    let time = t;
++    for (const note of notes) {
++      const osc = ctx.createOscillator();
++      const gainNode = ctx.createGain();
++      
++      osc.type = 'sawtooth';
++      osc.frequency.setValueAtTime(note.f, time);
++      
++      gainNode.gain.setValueAtTime(0, time);
++      gainNode.gain.linearRampToValueAtTime(0.3, time + 0.05);
++      gainNode.gain.exponentialRampToValueAtTime(0.01, time + note.d);
++      
++      osc.connect(gainNode);
++      gainNode.connect(ctx.destination);
++      
++      osc.start(time);
++      osc.stop(time + note.d);
++      
++      time += note.d + 0.05;
++    }
++  }
+ }
+ 
+ export const SoundEngine = new SoundEngineImpl();

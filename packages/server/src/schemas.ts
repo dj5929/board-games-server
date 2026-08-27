@@ -21,10 +21,12 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.object({
     ...baseAction, type: z.literal('PROPOSE_TRADE'),
     toPlayerId: z.string(),
-    offeredProperties: z.array(z.string()),
-    requestedProperties: z.array(z.string()),
-    offeredMoney: z.number(),
-    requestedMoney: z.number()
+    offeredProperties: z.array(z.string()).optional(),
+    requestedProperties: z.array(z.string()).optional(),
+    offeredMoney: z.number().optional(),
+    requestedMoney: z.number().optional(),
+    offer: z.record(z.number()).optional(),
+    request: z.record(z.number()).optional(),
   }),
   // Catan actions
   z.object({ ...baseAction, type: z.literal('BUILD_SETTLEMENT'), vertexId: z.string() }),
@@ -33,4 +35,13 @@ export const actionSchema = z.discriminatedUnion('type', [
   // Catan initial placement actions
   z.object({ ...baseAction, type: z.literal('PLACE_INITIAL_SETTLEMENT'), vertexId: z.string() }),
   z.object({ ...baseAction, type: z.literal('PLACE_INITIAL_ROAD'), edgeId: z.string() }),
+  // Additional Catan actions
+  z.object({ ...baseAction, type: z.literal('DISCARD_RESOURCES'), resources: z.record(z.number()) }),
+  z.object({ ...baseAction, type: z.literal('MOVE_ROBBER'), hexId: z.string(), targetPlayerId: z.string().optional() }),
+  z.object({ ...baseAction, type: z.literal('BUY_DEV_CARD') }),
+  z.object({ ...baseAction, type: z.literal('PLAY_KNIGHT'), hexId: z.string(), targetPlayerId: z.string().optional() }),
+  z.object({ ...baseAction, type: z.literal('PLAY_YEAR_OF_PLENTY'), resource1: z.string(), resource2: z.string() }),
+  z.object({ ...baseAction, type: z.literal('PLAY_MONOPOLY'), resource: z.string() }),
+  z.object({ ...baseAction, type: z.literal('PLAY_ROAD_BUILDING'), edgeId1: z.string(), edgeId2: z.string().optional() }),
+  z.object({ ...baseAction, type: z.literal('TRADE_BANK'), offerResource: z.string(), requestResource: z.string(), amount: z.number() }),
 ]);

@@ -46,7 +46,26 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
   },
 
   reduce(currentState: Readonly<IMonopolyState>, action: Readonly<MonopolyAction>, rng: IRandomProvider): Result<IStateTransition<IMonopolyState, MonopolyEvent>, string> {
-    const nextState = structuredClone(currentState) as unknown as MutableMonopolyState;
+    const nextPlayers = currentState.players.map(p => ({
+      ...p,
+      getOutOfJailFreeCards: [...p.getOutOfJailFreeCards],
+      debt: p.debt ? { ...p.debt } : null
+    }));
+
+    const nextState: MutableMonopolyState = {
+      ...currentState,
+      players: nextPlayers,
+      ownership: { ...currentState.ownership },
+      mortgagedProperties: { ...currentState.mortgagedProperties },
+      buildings: { ...currentState.buildings },
+      activeTrade: currentState.activeTrade ? {
+        ...currentState.activeTrade,
+        offeredProperties: [...currentState.activeTrade.offeredProperties],
+        requestedProperties: [...currentState.activeTrade.requestedProperties]
+      } : null,
+      chanceDeck: [...currentState.chanceDeck],
+      chestDeck: [...currentState.chestDeck]
+    };
     
     // Backward compatibility for existing games initialized before Phase 7
     if (!nextState.chanceDeck) nextState.chanceDeck = shuffleArray(CHANCE_CARDS.map(c => c.id), rng);
@@ -547,6 +566,16 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       }
 
       case 'PROPOSE_TRADE': {
+        const allProps = [...action.offeredProperties, ...action.requestedProperties];
+        for (const propId of allProps) {
+          const space = BOARD_SPACES.find(s => s.id === propId);
+          if (space && space.colorGroup) {
+            const groupSpaces = BOARD_SPACES.filter(s => s.colorGroup === space.colorGroup);
+            const hasBuildings = groupSpaces.some(s => (nextState.buildings[s.id] || 0) > 0);
+            if (hasBuildings) return { success: false, error: 'HAS_BUILDINGS_IN_GROUP' };
+          }
+        }
+        
         // Simple ID generation for MVP
         const id = rng.next().toString(36).substring(2, 9);
         const trade = {
@@ -644,6 +673,15 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
           if (nextState.ownership[propId] === currentPlayer.id) {
             if (creditor) {
               nextState.ownership[propId] = creditor.id;
+              
+              if (nextState.mortgagedProperties[propId]) {
+                const space = BOARD_SPACES.find(s => s.id === propId);
+                if (space && space.price) {
+                  const mortgageValue = Math.floor(space.price / 2);
+                  const interest = Math.ceil(mortgageValue * 0.1);
+                  creditor.money -= interest;
+                }
+              }
             } else {
               delete nextState.ownership[propId];
               delete nextState.buildings[propId];

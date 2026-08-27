@@ -154,4 +154,165 @@ describe('MonopolyEngine - Edge Cases & Phase E Features', () => {
     expect(state.chanceDeck[state.chanceDeck.length - 1]).toBe('chance_jail_free');
   });
 
+  it('should charge 10% interest when receiving a mortgaged property via bankruptcy', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    
+    // p1 goes bankrupt to p2. p1 has a mortgaged property.
+    (state as any).players[0].debt = { amount: 1000, to: playerId('p2'), reason: 'Rent' };
+    (state as any).players[0].money = 50;
+    
+    (state as any).ownership[propertyId('boardwalk')] = playerId('p1');
+    (state as any).mortgagedProperties[propertyId('boardwalk')] = true;
+    
+    // Boardwalk mortgage value is 200, so 10% interest is $20.
+    // p2 has 1500 + 50 (from p1) - 20 (interest) = 1530.
+    
+    const bankruptAction: MonopolyAction = { type: 'DECLARE_BANKRUPTCY', playerId: playerId('p1') };
+    const res = MonopolyEngine.reduce(state, bankruptAction, rng);
+    
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+    
+    expect(state.ownership[propertyId('boardwalk')]).toBe(playerId('p2'));
+    expect(state.mortgagedProperties[propertyId('boardwalk')]).toBe(true);
+    expect(state.players[1]!.money).toBe(1500 + 50 - 20);
+  });
+
+  it('should block BUY_HOUSE if any property in color group is mortgaged', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    
+    // p1 owns all Brown (mediterranean, baltic)
+    (state as any).ownership[propertyId('mediterranean')] = playerId('p1');
+    (state as any).ownership[propertyId('baltic')] = playerId('p1');
+    
+    // Baltic is mortgaged
+    (state as any).mortgagedProperties[propertyId('baltic')] = true;
+    (state as any).players[0].money = 1000;
+    
+    const buyAction: MonopolyAction = { type: 'BUY_HOUSE', propertyId: propertyId('mediterranean'), playerId: playerId('p1') };
+    const res = MonopolyEngine.reduce(state, buyAction, rng);
+    
+    expect(res.success).toBe(false);
+    expect(res.success === false && res.error).toBe('HAS_MORTGAGED');
+  });
+
+  it('should enforce even build and sell rule', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    
+    (state as any).ownership[propertyId('mediterranean')] = playerId('p1');
+    (state as any).ownership[propertyId('baltic')] = playerId('p1');
+    (state as any).players[0].money = 1000;
+    
+    // Build 1 house on Med
+    let res = MonopolyEngine.reduce(state, { type: 'BUY_HOUSE', propertyId: propertyId('mediterranean'), playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+    
+    // Try building 2nd on Med before Baltic has 1
+    res = MonopolyEngine.reduce(state, { type: 'BUY_HOUSE', propertyId: propertyId('mediterranean'), playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(false);
+    expect(res.success === false && res.error).toBe('EVEN_BUILD_RULE');
+    
+    // Build 1 on Baltic
+    res = MonopolyEngine.reduce(state, { type: 'BUY_HOUSE', propertyId: propertyId('baltic'), playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+
+    // Now both have 1. Build 2nd on Med.
+    res = MonopolyEngine.reduce(state, { type: 'BUY_HOUSE', propertyId: propertyId('mediterranean'), playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+
+    // Med has 2, Baltic has 1.
+    // Try selling Baltic (1) when Med has 2
+    res = MonopolyEngine.reduce(state, { type: 'SELL_HOUSE', propertyId: propertyId('baltic'), playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(false);
+    expect(res.success === false && res.error).toBe('EVEN_BUILD_RULE');
+  });
+
+  it('should block MORTGAGE_PROPERTY if there are buildings in the color group', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    
+    (state as any).ownership[propertyId('mediterranean')] = playerId('p1');
+    (state as any).ownership[propertyId('baltic')] = playerId('p1');
+    (state as any).buildings[propertyId('baltic')] = 1;
+    
+    const mortgageAction: MonopolyAction = { type: 'MORTGAGE_PROPERTY', propertyId: propertyId('mediterranean'), playerId: playerId('p1') };
+    const res = MonopolyEngine.reduce(state, mortgageAction, rng);
+    
+    expect(res.success).toBe(false);
+    expect(res.success === false && res.error).toBe('HAS_BUILDINGS');
+  });
+
+  it('should block PROPOSE_TRADE if color group has buildings', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    
+    (state as any).ownership[propertyId('mediterranean')] = playerId('p1');
+    (state as any).ownership[propertyId('baltic')] = playerId('p1');
+    (state as any).buildings[propertyId('baltic')] = 1;
+    
+    const tradeAction: MonopolyAction = { 
+      type: 'PROPOSE_TRADE', 
+      playerId: playerId('p1'),
+      toPlayerId: playerId('p2'),
+      offeredProperties: [propertyId('mediterranean')],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0
+    };
+    
+    const res = MonopolyEngine.reduce(state, tradeAction, rng);
+    expect(res.success).toBe(false);
+    expect(res.success === false && res.error).toBe('HAS_BUILDINGS_IN_GROUP');
+  });
+
+  it('should allow $50 payment on turn 1 or 2 to get out of jail', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    
+    (state as any).players[0].inJail = true;
+    (state as any).players[0].position = 10;
+    (state as any).players[0].money = 1500;
+    
+    const payAction: MonopolyAction = { type: 'PAY_JAIL_FINE', playerId: playerId('p1') };
+    const res = MonopolyEngine.reduce(state, payAction, rng);
+    
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+    
+    expect(state.players[0]!.inJail).toBe(false);
+    expect(state.players[0]!.money).toBe(1450);
+  });
+
+  it('should force payment of $50 on turn 3 if no doubles rolled', () => {
+    const rng = new DeterministicRNG([0.1, 0.4]); // 1 and 3 (not doubles)
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    
+    (state as any).players[0].inJail = true;
+    (state as any).players[0].position = 10;
+    (state as any).players[0].jailTurns = 2; // Next turn is the 3rd turn
+    (state as any).players[0].money = 1500;
+    
+    const rollAction: MonopolyAction = { type: 'ROLL_DICE', playerId: playerId('p1') };
+    const res = MonopolyEngine.reduce(state, rollAction, rng);
+    
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+    
+    expect(state.players[0]!.inJail).toBe(false);
+    expect(state.players[0]!.jailTurns).toBe(0);
+    expect(state.players[0]!.money).toBe(1450);
+  });
+
 });

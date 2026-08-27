@@ -1,4 +1,5 @@
 export * from './types';
 export * from './MonopolyEngine';
-export * from './board';
+export { BOARD_SPACES } from './board';
+export type { SpaceType, IBoardSpace } from './board';
 export * from './cards';

@@ -1,4 +1,5 @@
-import type { CatanPlayer, PlayerId } from '@packages/catan-engine';
+import type { CatanPlayer } from '@packages/catan-engine';
+import type { PlayerId } from '@packages/engine-core';
 
 interface Props {
   victims: CatanPlayer[];
@@ -16,7 +17,15 @@ export function CatanRobberVictimModal({ victims, onSelect, onCancel }: Props) {
         </p>
 
         {victims.length === 0 ? (
-          <p className="text-gray-500 mb-6">No players have resources here.</p>
+          <div className="mb-6">
+            <p className="text-gray-500 mb-4">No players have resources here.</p>
+            <button 
+              onClick={() => onSelect(undefined as any)}
+              className="w-full p-3 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold transition-colors"
+            >
+              Confirm Placement
+            </button>
+          </div>
         ) : (
           <div className="space-y-3 mb-6">
             {victims.map(v => (

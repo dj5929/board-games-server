@@ -1,4 +1,4 @@
-import { IGameState, IPlayerAction, IGameEvent, PlayerId } from '@packages/engine-core';
+import type { IGameState, IPlayerAction, IGameEvent, PlayerId } from '@packages/engine-core';
 
 export type ResourceType = 'WOOD' | 'BRICK' | 'SHEEP' | 'WHEAT' | 'ORE' | 'DESERT';
 
@@ -63,6 +63,12 @@ export interface ICatanState extends IGameState {
   readonly devCardDeck: readonly DevCardType[];
   readonly activePlayerId: PlayerId | null;
   readonly activeTrade: ICatanTradeOffer | null;
+  readonly longestRoadOwner: PlayerId | null;
+  readonly longestRoadLength: number;
+  readonly largestArmyOwner: PlayerId | null;
+  readonly largestArmySize: number;
+  readonly winner: PlayerId | null;
+  readonly playedDevCardThisTurn: boolean;
 }
 
 export type ICatanAction = IPlayerAction & (
@@ -109,4 +115,7 @@ export type ICatanEvent = IGameEvent & (
   | { type: 'TRADE_ACCEPTED'; tradeId: string }
   | { type: 'TRADE_REJECTED'; tradeId: string }
   | { type: 'TRADE_CANCELLED'; tradeId: string }
+  | { type: 'GAME_OVER'; winnerId: PlayerId }
+  | { type: 'LONGEST_ROAD_AWARDED'; playerId: PlayerId; length: number }
+  | { type: 'LARGEST_ARMY_AWARDED'; playerId: PlayerId; size: number }
 );

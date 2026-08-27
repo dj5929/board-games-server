@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 interface Props {
   game: 'CATAN' | 'MONOPOLY';
@@ -42,6 +42,13 @@ export function RulebookModal({ game, onClose }: Props) {
                 <li>Any player with more than 7 resource cards must discard half of them (rounded down).</li>
                 <li>The player who rolled the 7 moves the Robber to a new hex, blocking its resource production.</li>
               </ul>
+
+              <h3 className="text-xl font-bold text-orange-400 mt-4">Progression Strategy</h3>
+              <ul className="list-disc pl-5 space-y-2">
+                <li><strong>Early Game:</strong> Prioritize Wood and Brick to build roads and new settlements. Try to secure high-probability hexes (6s and 8s).</li>
+                <li><strong>Mid Game:</strong> Focus on Wheat and Ore to upgrade settlements into Cities. If you have excess of one resource, build near a 3:1 port or a specialized 2:1 port.</li>
+                <li><strong>Late Game:</strong> Buy Development Cards to secure hidden Victory Points or knights. Compete for the Longest Road or Largest Army (worth 2 VP each).</li>
+              </ul>
             </>
           ) : (
             <>
@@ -72,6 +79,13 @@ export function RulebookModal({ game, onClose }: Props) {
               
               <h3 className="text-xl font-bold text-blue-400 mt-4">Bankruptcy</h3>
               <p>If you owe more money than you can pay, you are bankrupt and must retire from the game.</p>
+
+              <h3 className="text-xl font-bold text-blue-400 mt-4">Progression Strategy</h3>
+              <ul className="list-disc pl-5 space-y-2">
+                <li><strong>Early Game:</strong> Buy as many properties as possible. Railroads are highly valuable early on for consistent income. Don't worry too much about monopolies yet.</li>
+                <li><strong>Mid Game:</strong> Focus on completing color sets through trading. The Orange and Red properties are statistically the most landed on due to players leaving Jail.</li>
+                <li><strong>Late Game:</strong> Build houses and hotels aggressively on your monopolies. If you go to Jail in the late game, stay there as long as possible to avoid landing on opponents' deadly properties while collecting your own rent.</li>
+              </ul>
             </>
           )}
         </div>

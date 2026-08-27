@@ -1,4 +1,4 @@
-import { IRandomProvider } from './types';
+import type { IRandomProvider } from './types';
 
 /**
  * Fisher-Yates shuffle: returns a new shuffled copy of the array.

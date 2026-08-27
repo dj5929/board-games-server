@@ -140,6 +140,64 @@ class SoundEngineImpl {
     osc.start(t);
     osc.stop(t + 1.1);
   }
+  public playCatanBuild() {
+    if (!this.isEnabled) return;
+    const ctx = this.getContext();
+    const t = ctx.currentTime;
+    
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    osc.type = 'triangle';
+    
+    osc.frequency.setValueAtTime(200, t);
+    osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
+
+    gainNode.gain.setValueAtTime(0, t);
+    gainNode.gain.linearRampToValueAtTime(0.4, t + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.2);
+  }
+
+  public playVictorySound() {
+    if (!this.isEnabled) return;
+    const ctx = this.getContext();
+    const t = ctx.currentTime;
+    
+    // Trumpet-like fanfare
+    const notes = [
+      { f: 523.25, d: 0.15 }, // C5
+      { f: 523.25, d: 0.15 }, // C5
+      { f: 523.25, d: 0.15 }, // C5
+      { f: 659.25, d: 0.4 },  // E5
+    ];
+    
+    let time = t;
+    for (const note of notes) {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(note.f, time);
+      
+      gainNode.gain.setValueAtTime(0, time);
+      gainNode.gain.linearRampToValueAtTime(0.3, time + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, time + note.d);
+      
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      osc.start(time);
+      osc.stop(time + note.d);
+      
+      time += note.d + 0.05;
+    }
+  }
 }
 
 export const SoundEngine = new SoundEngineImpl();

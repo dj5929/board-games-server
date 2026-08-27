@@ -1,5 +1,5 @@
-import { IGameEngine, IRandomProvider, Result, IStateTransition, PlayerId, playerId } from '@packages/engine-core';
-import { ICatanState, ICatanAction, ICatanEvent, CatanPlayer, ResourceType, Hex, Vertex, Edge, DevCardType } from './types';
+import { playerId, type IGameEngine, type IRandomProvider, type Result, type IStateTransition, type PlayerId } from '@packages/engine-core';
+import type { ICatanState, ICatanAction, ICatanEvent, CatanPlayer, ResourceType, Hex, Vertex, Edge, DevCardType } from './types';
 import { generateBoard, boardGraph } from './board';
 
 // Helper type to allow mutating the cloned state in reduce
@@ -11,6 +11,129 @@ type MutableCatanState = {
     P extends 'devCardDeck' ? DevCardType[] :
     ICatanState[P];
 };
+
+function calculateLongestRoad(playerId: PlayerId, board: ICatanState['board']): number {
+  const playerEdges = Object.keys(board.edges).filter(eId => board.edges[eId]!.owner === playerId);
+  if (playerEdges.length === 0) return 0;
+  
+  let maxLength = 0;
+  const memo = new Map<string, number>();
+
+  function dfs(vertexId: string, visitedEdges: ReadonlySet<string>): number {
+    const memoKey = `${vertexId}|${Array.from(visitedEdges).sort().join(',')}`;
+    if (memo.has(memoKey)) return memo.get(memoKey)!;
+
+    const vertex = board.vertices[vertexId];
+    if (vertex && vertex.building && vertex.owner !== playerId) {
+      memo.set(memoKey, 0);
+      return 0;
+    }
+
+    let maxSubPath = 0;
+    const adjacentEdges = boardGraph.vertices[vertexId]!.adjacentEdges;
+    
+    for (const edgeId of adjacentEdges) {
+      if (board.edges[edgeId]?.owner === playerId && !visitedEdges.has(edgeId)) {
+        const newVisited = new Set(visitedEdges);
+        newVisited.add(edgeId);
+        
+        const nextVertex = boardGraph.edges[edgeId]!.adjacentVertices.find(v => v !== vertexId)!;
+        const subLength = 1 + dfs(nextVertex, newVisited);
+        if (subLength > maxSubPath) {
+          maxSubPath = subLength;
+        }
+      }
+    }
+    
+    memo.set(memoKey, maxSubPath);
+    return maxSubPath;
+  }
+
+  for (const edgeId of playerEdges) {
+    const vertices = boardGraph.edges[edgeId]!.adjacentVertices;
+    for (const vId of vertices) {
+      const len = dfs(vId, new Set());
+      if (len > maxLength) {
+        maxLength = len;
+      }
+    }
+  }
+  
+  return maxLength;
+}
+
+function checkWinConditionAndAwards(nextState: MutableCatanState, events: ICatanEvent[]) {
+  if (nextState.status === 'FINISHED') return;
+
+  // 1. Recalculate Longest Road
+  let activeMaxRoad = 0;
+  let candidates: PlayerId[] = [];
+  for (const p of nextState.players) {
+    const len = calculateLongestRoad(p.id, nextState.board);
+    if (len > activeMaxRoad) {
+      activeMaxRoad = len;
+      candidates = [p.id];
+    } else if (len === activeMaxRoad) {
+      candidates.push(p.id);
+    }
+  }
+  
+  if (activeMaxRoad >= 5) {
+    if (candidates.length === 1 && candidates[0] !== nextState.longestRoadOwner) {
+      nextState.longestRoadOwner = candidates[0]!;
+      nextState.longestRoadLength = activeMaxRoad;
+      events.push({ type: 'LONGEST_ROAD_AWARDED', playerId: candidates[0]!, length: activeMaxRoad });
+    } else if (candidates.length > 1 && !candidates.includes(nextState.longestRoadOwner!)) {
+      if (nextState.longestRoadOwner !== null) {
+         nextState.longestRoadOwner = null;
+         nextState.longestRoadLength = 4;
+      }
+    } else if (candidates.includes(nextState.longestRoadOwner!)) {
+      nextState.longestRoadLength = activeMaxRoad;
+    }
+  } else {
+    nextState.longestRoadOwner = null;
+    nextState.longestRoadLength = 4;
+  }
+  
+  // 2. Largest Army
+  let maxArmy = nextState.largestArmySize || 2;
+  for (const p of nextState.players) {
+    const knights = p.playedDevelopmentCards.filter(c => c === 'KNIGHT').length;
+    if (knights > maxArmy) {
+      maxArmy = knights;
+      nextState.largestArmyOwner = p.id;
+      nextState.largestArmySize = knights;
+      events.push({ type: 'LARGEST_ARMY_AWARDED', playerId: p.id, size: knights });
+    }
+  }
+
+  // 3. Victory Points Calculation
+  for (const p of nextState.players) {
+    let vp = 0;
+    Object.values(nextState.board.vertices).forEach(v => {
+      if (v.owner === p.id) {
+        if (v.building === 'SETTLEMENT') vp += 1;
+        if (v.building === 'CITY') vp += 2;
+      }
+    });
+    
+    if (nextState.longestRoadOwner === p.id) vp += 2;
+    if (nextState.largestArmyOwner === p.id) vp += 2;
+    
+    vp += p.developmentCards.filter(c => c.type === 'VICTORY_POINT').length;
+    vp += p.playedDevelopmentCards.filter(c => c === 'VICTORY_POINT').length;
+    
+    p.victoryPoints = vp;
+    
+    if (vp >= 10 && nextState.activePlayerId === p.id) {
+      nextState.winner = p.id;
+      nextState.status = 'FINISHED';
+      events.push({ type: 'GAME_OVER', winnerId: p.id });
+      break;
+    }
+  }
+}
 
 export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = {
   getInitialState(playerIds: PlayerId[], rng: IRandomProvider): ICatanState {
@@ -47,7 +170,13 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
       pendingDiscards: {},
       devCardDeck,
       activePlayerId: players[0]!.id,
-      activeTrade: null
+      activeTrade: null,
+      longestRoadOwner: null,
+      longestRoadLength: 4,
+      largestArmyOwner: null,
+      largestArmySize: 2,
+      winner: null,
+      playedDevCardThisTurn: false
     };
   },
 
@@ -148,6 +277,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           });
         }
 
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
       
@@ -178,6 +308,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           nextState.turnPhase = 'ROBBER_PLACEMENT';
         }
         
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -185,14 +316,18 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
         if (currentState.turnPhase !== 'ROBBER_PLACEMENT') return { success: false, error: 'Not in robber placement phase' };
         
-        const newHex = nextBoard.hexes.find(h => h.id === action.hexId);
-        if (!newHex) return { success: false, error: 'Invalid hex' };
-        if (newHex.hasRobber) return { success: false, error: 'Robber must move to a new hex' };
+        const targetHexIndex = nextBoard.hexes.findIndex(h => h.id === action.hexId);
+        if (targetHexIndex === -1) return { success: false, error: 'Invalid hex' };
+        if (nextBoard.hexes[targetHexIndex]!.hasRobber) return { success: false, error: 'Robber must move to a new hex' };
         
         // Remove from old hex
-        nextBoard.hexes.forEach(h => { h.hasRobber = false; });
+        const oldHexIndex = nextBoard.hexes.findIndex(h => h.hasRobber);
+        if (oldHexIndex !== -1) {
+          nextBoard.hexes[oldHexIndex] = { ...nextBoard.hexes[oldHexIndex]!, hasRobber: false };
+        }
+        
         // Place on new hex
-        newHex.hasRobber = true;
+        nextBoard.hexes[targetHexIndex] = { ...nextBoard.hexes[targetHexIndex]!, hasRobber: true };
         
         events.push({ type: 'ROBBER_MOVED', playerId: action.playerId, hexId: action.hexId });
 
@@ -225,6 +360,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         }
         
         nextState.turnPhase = 'MAIN_TURN';
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
       
@@ -270,6 +406,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.victoryPoints += 1;
 
         events.push({ type: 'SETTLEMENT_BUILT', playerId: action.playerId, vertexId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -319,6 +456,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         nextBoard.edges[edgeId] = { ...edge, owner: action.playerId };
         
         events.push({ type: 'ROAD_BUILT', playerId: action.playerId, edgeId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -348,6 +486,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.victoryPoints += 1;
 
         events.push({ type: 'CITY_UPGRADED', playerId: action.playerId, vertexId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -388,6 +527,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources[requestResource as keyof typeof activePlayer.resources] += amount;
         
         events.push({ type: 'BANK_TRADE', playerId: action.playerId, offerResource, requestResource, amount, cost: totalCost });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -411,6 +551,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         };
         
         events.push({ type: 'TRADE_PROPOSED', trade: nextState.activeTrade });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -445,6 +586,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         const tradeId = trade.id;
         nextState.activeTrade = null;
         events.push({ type: 'TRADE_ACCEPTED', tradeId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -455,6 +597,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         const tradeId = currentState.activeTrade.id;
         nextState.activeTrade = null;
         events.push({ type: 'TRADE_REJECTED', tradeId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -479,28 +622,36 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         });
 
         events.push({ type: 'DEV_CARD_BOUGHT', playerId: action.playerId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
       case 'PLAY_KNIGHT': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.playedDevCardThisTurn) return { success: false, error: 'Already played a development card this turn' };
         const cardIndex = activePlayer.developmentCards.findIndex(c => c.type === 'KNIGHT' && !c.boughtThisTurn);
         if (cardIndex === -1) return { success: false, error: 'No playable Knight card' };
 
         activePlayer.developmentCards.splice(cardIndex, 1);
         activePlayer.playedDevelopmentCards.push('KNIGHT');
+        nextState.playedDevCardThisTurn = true;
         
         events.push({ type: 'DEV_CARD_PLAYED', playerId: action.playerId, cardType: 'KNIGHT' });
         
         // Similar to MOVE_ROBBER but we need to put it into ROBBER_PLACEMENT phase first,
         // Wait, the action requires the hexId and targetPlayerId immediately.
         // Let's implement it like MOVE_ROBBER inline.
-        const newHex = nextBoard.hexes.find(h => h.id === action.hexId);
-        if (!newHex) return { success: false, error: 'Invalid hex' };
-        if (newHex.hasRobber) return { success: false, error: 'Robber must move to a new hex' };
-        
-        nextBoard.hexes.forEach(h => { h.hasRobber = false; });
-        newHex.hasRobber = true;
+        const targetHexIndex = nextBoard.hexes.findIndex(h => h.id === action.hexId);
+        if (targetHexIndex === -1) return { success: false, error: 'Invalid hex' };
+        if (nextBoard.hexes[targetHexIndex]!.hasRobber) return { success: false, error: 'Robber already there' };
+
+        // Remove old robber
+        const oldHexIndex = nextBoard.hexes.findIndex(h => h.hasRobber);
+        if (oldHexIndex !== -1) {
+          nextBoard.hexes[oldHexIndex] = { ...nextBoard.hexes[oldHexIndex]!, hasRobber: false };
+        }
+
+        nextBoard.hexes[targetHexIndex] = { ...nextBoard.hexes[targetHexIndex]!, hasRobber: true };
         
         events.push({ type: 'ROBBER_MOVED', playerId: action.playerId, hexId: action.hexId });
 
@@ -531,31 +682,37 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           }
         }
         
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
       case 'PLAY_YEAR_OF_PLENTY': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.playedDevCardThisTurn) return { success: false, error: 'Already played a development card this turn' };
         const cardIndex = activePlayer.developmentCards.findIndex(c => c.type === 'YEAR_OF_PLENTY' && !c.boughtThisTurn);
         if (cardIndex === -1) return { success: false, error: 'No playable Year of Plenty card' };
 
         activePlayer.developmentCards.splice(cardIndex, 1);
         activePlayer.playedDevelopmentCards.push('YEAR_OF_PLENTY');
+        nextState.playedDevCardThisTurn = true;
         
         activePlayer.resources[action.resource1] += 1;
         activePlayer.resources[action.resource2] += 1;
 
         events.push({ type: 'DEV_CARD_PLAYED', playerId: action.playerId, cardType: 'YEAR_OF_PLENTY' });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
       case 'PLAY_MONOPOLY': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.playedDevCardThisTurn) return { success: false, error: 'Already played a development card this turn' };
         const cardIndex = activePlayer.developmentCards.findIndex(c => c.type === 'MONOPOLY' && !c.boughtThisTurn);
         if (cardIndex === -1) return { success: false, error: 'No playable Monopoly card' };
 
         activePlayer.developmentCards.splice(cardIndex, 1);
         activePlayer.playedDevelopmentCards.push('MONOPOLY');
+        nextState.playedDevCardThisTurn = true;
         
         let stolenCount = 0;
         nextPlayers.forEach(p => {
@@ -571,11 +728,13 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources[action.resource] += stolenCount;
 
         events.push({ type: 'DEV_CARD_PLAYED', playerId: action.playerId, cardType: 'MONOPOLY' });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
       case 'PLAY_ROAD_BUILDING': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.playedDevCardThisTurn) return { success: false, error: 'Already played a development card this turn' };
         const cardIndex = activePlayer.developmentCards.findIndex(c => c.type === 'ROAD_BUILDING' && !c.boughtThisTurn);
         if (cardIndex === -1) return { success: false, error: 'No playable Road Building card' };
 
@@ -597,6 +756,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         
         activePlayer.developmentCards.splice(cardIndex, 1);
         activePlayer.playedDevelopmentCards.push('ROAD_BUILDING');
+        nextState.playedDevCardThisTurn = true;
         
         for (const edgeId of edges) {
           nextBoard.edges[edgeId]!.owner = action.playerId;
@@ -604,6 +764,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         }
         
         events.push({ type: 'DEV_CARD_PLAYED', playerId: action.playerId, cardType: 'ROAD_BUILDING' });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -614,6 +775,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         const tradeId = currentState.activeTrade.id;
         nextState.activeTrade = null;
         events.push({ type: 'TRADE_CANCELLED', tradeId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -632,8 +794,10 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
            nextState.activeTrade = null;
         }
 
+        nextState.playedDevCardThisTurn = false;
         nextState.activePlayerId = nextPlayerId;
         events.push({ type: 'TURN_ENDED', nextPlayerId });
+        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 

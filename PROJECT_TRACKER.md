@@ -123,21 +123,22 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Robber Mechanics:** Implement action to move robber on a roll of 7, steal from adjacent players, and forced resource discarding for >7 cards.
 - 🟢 **Development Cards:** Implement `BUY_DEV_CARD` and playing specific cards (Knight, Year of Plenty, Monopoly, Road Building).
 
+### 🟢 Phase 18: Catan Awards, Win Condition & Polish
+- 🟢 **Achievements:** Automated tracking and awarding of Longest Route (requires DFS pathfinding, min 5 roads) and Largest Army (min 3 knights).
+- 🟢 **Win Condition:** Automatically declare winner upon reaching 10 Victory Points (including hidden VP cards, which can be played on the turn purchased to win).
+- 🟢 **Audio & Visual Polish:** Catan-specific animations, dice rolls, and sound effects.
+
+### 🟢 Phase 19: Edge Cases & Rule Enforcement
+- 🟢 **Monopoly Edge Cases:** Implemented the 10% interest rule for mortgaged properties during bankruptcy, enforced the even-build/sell rule, blocked building and trading if properties are mortgaged or have buildings, and added the $50 jail fine mechanics on turns 1-3.
+- 🟢 **Catan Edge Cases:** Restricted playing development cards to one per turn (excluding those bought the same turn). Automated 2 VP awards for the Longest Road and Largest Army achievements.
+- 🟢 **Comprehensive Testing:** Added 100% test coverage for these edge case scenarios in `packages/monopoly-engine/__tests__/edge-cases.test.ts` and `packages/catan-engine/__tests__/edge-cases.test.ts`.
+- 🟢 **Performance & Immutability:** Optimized Monopoly Engine CPU usage by replacing structured clones with shallow state cloning. Fixed critical immutability violations in Catan Engine robber placement.
+- 🟢 **UI Synchronization:** Resolved UI mismatches for Catan engine updates, including robber placement logic when there are no valid victims, added missing toast notifications for advanced mechanics (discarding, moving robber, stealing, playing/buying dev cards), and fixed the Road Building development card edge case to allow optional single road placement.
+
 ---
 
 ## 🟡 Active & Remaining Roadmap
-
-
-
-
-
-### 🔴 Phase 18: Catan Awards, Win Condition & Polish
-- 🔴 **Achievements:** Automated tracking and awarding of Longest Route (requires DFS pathfinding, min 5 roads) and Largest Army (min 3 knights).
-- 🔴 **Win Condition:** Automatically declare winner upon reaching 10 Victory Points (including hidden VP cards, which can be played on the turn purchased to win).
-- 🔴 **Audio & Visual Polish:** Catan-specific animations, dice rolls, and sound effects.
-
-### 🔴 Phase 19: Infrastructure & Deployment
-- 🔴 **Dockerization:** Containerize Fastify server and Vite client with Dockerfile and `docker-compose.yml`.
+- 🔴 **Infrastructure & Deployment (Phase 20):** Containerize Fastify server and Vite client with Dockerfile and `docker-compose.yml`.
 - 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances.
 - 🔴 **CI/CD Pipeline:** GitHub Actions workflow for automated testing (`npm test`) and lint checks.
 
@@ -147,3 +148,4 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🔴 **Online Multiplayer Mode:** Re-enable online mode allowing players to join via Room IDs across multiple machines (UI temporarily disabled in Phase 12).
 - 🔴 **Turn Timer / AFK Management:** Add a visual countdown timer to enforce active play and auto-kick/bankrupt AFK players.
 - 🔴 **Auctions:** Automatically trigger an auction bidding phase when a player lands on an unowned property and declines to buy it.
+
