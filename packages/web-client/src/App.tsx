@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { Lobby } from './components/Lobby';
 import { GameRoom } from './components/GameRoom';
 import { CatanRoom } from './components/CatanRoom';
+import { ScotlandYardRoom } from './components/ScotlandYardRoom';
 
 import { AudioToggle } from './components/AudioToggle';
 
 interface GameConfig {
   roomId: string;
   localPlayerIds: string[];
-  gameType: 'monopoly' | 'catan';
+  gameType: 'monopoly' | 'catan' | 'scotland-yard';
 }
 
 function App() {
@@ -23,7 +24,9 @@ function App() {
         ) : (
           gameConfig.gameType === 'monopoly' ? 
             <GameRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} onLeave={() => setGameConfig(null)} /> :
-            <CatanRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} onLeave={() => setGameConfig(null)} />
+          gameConfig.gameType === 'catan' ?
+            <CatanRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} onLeave={() => setGameConfig(null)} /> :
+            <ScotlandYardRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} onLeave={() => setGameConfig(null)} />
         )}
       </main>
     </div>

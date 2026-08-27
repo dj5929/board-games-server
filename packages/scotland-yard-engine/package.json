@@ -1,0 +1,12 @@
+{
+  "name": "@packages/scotland-yard-engine",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@packages/engine-core": "*",
+    "zod": "^3.22.4"
+  }
+}

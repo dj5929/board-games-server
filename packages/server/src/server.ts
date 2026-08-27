@@ -5,6 +5,7 @@ import { roomManager } from './RoomManager';
 import { Room } from './Room';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { CatanEngine } from '@packages/catan-engine';
+import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
 import { actionSchema } from './schemas';
 
 const fastify = Fastify({ logger: true });
@@ -25,6 +26,8 @@ fastify.post<{ Body: { playerCount?: number; gameType?: string } }>('/rooms', as
   let engine: any = MonopolyEngine;
   if (gameType === 'catan') {
     engine = CatanEngine;
+  } else if (gameType === 'scotland-yard') {
+    engine = ScotlandYardEngine;
   }
 
   const room = new Room(roomId, gameType, engine, MathRandomProvider, playerIds);

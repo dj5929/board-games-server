@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { SoundEngine } from '../utils/SoundEngine';
 
 export function AudioToggle() {

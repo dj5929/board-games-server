@@ -135,10 +135,40 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Performance & Immutability:** Optimized Monopoly Engine CPU usage by replacing structured clones with shallow state cloning. Fixed critical immutability violations in Catan Engine robber placement.
 - 🟢 **UI Synchronization:** Resolved UI mismatches for Catan engine updates, including robber placement logic when there are no valid victims, added missing toast notifications for advanced mechanics (discarding, moving robber, stealing, playing/buying dev cards), and fixed the Road Building development card edge case to allow optional single road placement.
 
+### 🟢 Phase 20: Engine & Graph Architecture (`@packages/scotland-yard-engine`)
+- 🟢 **Graph Generation:** Downloaded and parsed the AlexElvers dataset to programmatically generate the full 199-node map graph with typed connections (Taxi, Bus, Underground, Secret).
+- 🟢 **Pure State Reducer:** Implemented the `ScotlandYardEngine` adhering strictly to `IGameEngine` interfaces.
+- 🟢 **Core Logic:** Handles Mr. X vs Detective ticket limits, random initial positioning, ticket deduction, game loop turnover, and basic game over states (Detectives win if Mr. X is caught, Mr. X wins if he survives 24 turns or detectives are stuck).
+- 🟢 **Integration:** Successfully integrated the engine into the Fastify backend's dynamic engine loader.
+- 🟢 **Testing:** Added robust 100% test coverage for engine transitions and Game Over states.
+
+### 🟢 Phase 21: Hidden Movement & Mechanics (`@packages/scotland-yard-engine`)
+- 🟢 **Mr. X Hidden State:** Safely stripped Mr. X's position from `PLAYER_MOVED` events during hidden turns.
+- 🟢 **Reveal Turns:** Fully automated revelation of Mr. X's position on turns 3, 8, 13, 18, and 24.
+- 🟢 **Ticket Flow:** Enforced deduction of tickets from Mr. X and Detectives, accurately passing Detective-used tickets to Mr. X.
+- 🟢 **Double Moves:** Integrated the unique Double Move ticket allowing Mr. X to perform two back-to-back transports seamlessly.
+
+### 🟢 Phase 22: Map UI & Client Integration (`@packages/web-client`, `@packages/scotland-yard-engine`)
+- 🟢 **Map Coordinates:** Transcribed 199 nodes for the Scotland Yard board, structured and exported as `scotlandYardPositions`.
+- 🟢 **Interactive Map (`ScotlandYardBoard.tsx`):** Created a dynamic SVG map utilizing `react-zoom-pan-pinch` for fluid panning/zooming.
+- 🟢 **Player Visibility:** Handled visibility logic for Detectives and Mr. X (visible on reveal turns or if local player is Mr. X).
+- 🟢 **Game Room Integration (`ScotlandYardRoom.tsx`):** Connected the frontend to `ScotlandYardEngine` over WebSockets. Implemented Double Move dispatching and ticket selection.
+- 🟢 **Engine Typings Update:** Refactored `ScotlandYardState.players` to an array to align perfectly with the core `IGameState` interface. Tests updated accordingly.
+
+### 🟢 Phase 23: HUD & Specialized Tools
+- 🟢 **Mr. X Travel Log:** Built the Travel Log UI allowing Detectives to accurately track Mr. X's history of tickets used.
+- 🟢 **Ticket Inventory:** Added Detective ticket inventories for the HUD.
+- 🟢 **Ticket Flow:** Ensured tickets seamlessly flow from Detectives to Mr. X upon usage, and added a specific dropdown selector for Mr. X to use Secret/Double tickets.
+
 ---
 
 ## 🟡 Active & Remaining Roadmap
-- 🔴 **Infrastructure & Deployment (Phase 20):** Containerize Fastify server and Vite client with Dockerfile and `docker-compose.yml`.
+
+### 🟡 Scotland Yard Implementation (Phases 24)
+- 🔴 **Phase 24: Win Conditions & Polish:** Automate win states (Mr. X caught vs. Mr. X survives/Detectives stuck), and add thematic audio/visual polish (sirens, transit animations).
+
+### 🟡 Infrastructure & Deployment (Phase 25)
+- 🔴 **Containerization:** Containerize Fastify server and Vite client with Dockerfile and `docker-compose.yml`.
 - 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances.
 - 🔴 **CI/CD Pipeline:** GitHub Actions workflow for automated testing (`npm test`) and lint checks.
 

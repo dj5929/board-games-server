@@ -1,6 +1,6 @@
 # Universal Multiplayer Board Game Platform (Agent Rules)
 
-**Current Focus:** Infrastructure & Deployment (Phase 20)
+**Current Focus:** Win Conditions & Polish (Phase 24)
 **Tracker:** See [PROJECT_TRACKER.md](./PROJECT_TRACKER.md) for roadmap and status.
 **Fixes:** See [FIXES.md](./FIXES.md) for identified issues, planned improvements, and implementation diffs.
 

@@ -5,6 +5,7 @@ A modular, multi-game platform supporting classic board games, powered by **Type
 This monorepo project currently implements the rules and logic for:
 - 🎩 **Monopoly**
 - 🐑 **Catan**
+- 🕵️ **Scotland Yard**
 
 ## 🏗️ Architecture
 
@@ -63,6 +64,7 @@ flowchart TD
 - `@packages/engine-core`: Shared interfaces (`IGameEngine`, `IGameState`, `IPlayerAction`) defining the pure state machine boundaries.
 - `@packages/monopoly-engine`: Complete Monopoly ruleset with property management, trading, dice logic, jail rules, bankruptcy, and Chance/Community chest cards.
 - `@packages/catan-engine`: Resource management, hex grid coordinate systems, building, maritime trade, robber mechanics, development cards, awards, and win conditions.
+- `@packages/scotland-yard-engine`: Graph-based map navigation, hidden movement, ticket management, and Mr. X reveal mechanics.
 - `@packages/server`: A Fastify + WebSocket (`@fastify/websocket`) server with robust Zod validation for room and game state synchronization.
 - `@packages/web-client`: The frontend React application built with Vite and Tailwind CSS. Features highly interactive UIs, smooth CSS animations, floating event logs, Web Audio API sound effects, and robust optimistic state updates.
 

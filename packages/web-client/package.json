@@ -12,11 +12,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@packages/catan-engine": "*",
     "@packages/engine-core": "*",
     "@packages/monopoly-engine": "*",
-    "@packages/catan-engine": "*",
+    "@packages/scotland-yard-engine": "*",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-zoom-pan-pinch": "^4.0.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

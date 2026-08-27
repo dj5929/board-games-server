@@ -3,7 +3,7 @@ import { useState } from 'react';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface Props {
-  onJoinRoom: (roomId: string, localPlayerIds: string[], gameType: 'monopoly' | 'catan') => void;
+  onJoinRoom: (roomId: string, localPlayerIds: string[], gameType: 'monopoly' | 'catan' | 'scotland-yard') => void;
 }
 
 export function Lobby({ onJoinRoom }: Props) {
@@ -11,7 +11,7 @@ export function Lobby({ onJoinRoom }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'local' | 'online'>('local');
   const [playerCount, setPlayerCount] = useState<number>(2);
-  const [gameType, setGameType] = useState<'monopoly' | 'catan'>('monopoly');
+  const [gameType, setGameType] = useState<'monopoly' | 'catan' | 'scotland-yard'>('monopoly');
 
   const handleCreate = async () => {
     setIsLoading(true);
@@ -33,6 +33,7 @@ export function Lobby({ onJoinRoom }: Props) {
     setIsLoading(false);
   };
 
+  // @ts-ignore
   const _handleJoin = async () => {
     if (!_joinId) return;
     setIsLoading(true);
@@ -88,6 +89,12 @@ export function Lobby({ onJoinRoom }: Props) {
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'catan' ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Catan
+          </button>
+          <button 
+            onClick={() => setGameType('scotland-yard')}
+            className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'scotland-yard' ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+          >
+            Scotland Yard
           </button>
         </div>
 

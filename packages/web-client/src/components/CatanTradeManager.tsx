@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { boardGraph, type ICatanState, type ResourceType } from '@packages/catan-engine';
 import type { PlayerId } from '@packages/engine-core';
 
