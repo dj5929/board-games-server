@@ -48,6 +48,43 @@ describe('RoomManager', () => {
     manager.stopCleanup();
   });
 
+  it('closes the sockets of an idle room during cleanup (MED-1)', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const manager = new RoomManager();
+    const stale = makeRoom('stale');
+    manager.createRoom(stale);
+
+    const close = vi.fn();
+    (stale as any).addConnection('p1', { send: vi.fn(), close });
+
+    stale.lastActivity = Date.now() - 31 * 60 * 1000;
+
+    vi.advanceTimersByTime(5 * 60 * 1000);
+
+    expect(manager.getRoom('stale')).toBeUndefined();
+    expect(close).toHaveBeenCalled();
+    logSpy.mockRestore();
+    manager.stopCleanup();
+  });
+
+  it('rejects room creation beyond the capacity limit (MED-3)', () => {
+    const manager = new RoomManager();
+    let threw = false;
+    (manager as any).rooms.clear();
+    // Place the map at capacity
+    (manager as any).rooms = new Map(
+      Array.from({ length: 10000 }, (_, i) => [`room${i}`, makeRoom(`room${i}`)])
+    );
+    try {
+      manager.createRoom(makeRoom('overflow'));
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    expect(manager.roomCount).toBe(10000);
+    manager.stopCleanup();
+  });
+
   it('keeps rooms that are still active', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const manager = new RoomManager();

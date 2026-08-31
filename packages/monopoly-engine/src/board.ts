@@ -55,3 +55,7 @@ export const BOARD_SPACES: IBoardSpace[] = [
   { id: 'tax2' as PropertyId, name: 'Luxury Tax', type: 'TAX' },
   { id: 'boardwalk' as PropertyId, name: 'Boardwalk', type: 'PROPERTY', price: 400, baseRent: 50, colorGroup: 'DarkBlue', housePrice: 200, rentWithHouses: [200, 600, 1400, 1700, 2000] },
 ];
+
+export const BOARD_SPACES_MAP: ReadonlyMap<PropertyId, IBoardSpace> = new Map(
+  BOARD_SPACES.map(space => [space.id, space])
+);

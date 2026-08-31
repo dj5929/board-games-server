@@ -297,6 +297,17 @@ describe('ScotlandYardEngine - Game Flow', () => {
     })).toBe(false);
   });
 
+  it('rejects moves where the action.playerId is not the active player (MED-7)', () => {
+    // active player is mrX; a detective impersonating cannot move
+    const res = ScotlandYardEngine.reduce(state, {
+      type: 'MOVE', playerId: det1, payload: { targetNode: 27, ticketType: 'taxi' }
+    }, rng);
+    expect(res.success).toBe(false);
+    expect(ScotlandYardEngine.isValidAction(state, {
+      type: 'MOVE', playerId: det1, payload: { targetNode: 27, ticketType: 'taxi' }
+    })).toBe(false);
+  });
+
   it('ends the game when a DOUBLE_MOVE lands on a detective on the first leg', () => {
     place(state, det1, 46);
     const res = ScotlandYardEngine.reduce(state, {

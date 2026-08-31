@@ -6,107 +6,81 @@ Coverage is measured with **Vitest + `@vitest/coverage-v8`**. Regenerate the rep
 npm run test:cov
 ```
 
-Current baseline: **238 tests / 25 test files passing** (`npm test`). Lint (`npm run lint`) and typecheck (`tsc --noEmit -p tsconfig.json`) are clean.
+Current baseline: **259 tests / 26 test files passing** (`npm test`). Lint (`npm run lint` + web-client lint) and typecheck (`tsc --noEmit -p tsconfig.json`) are clean.
 
 ## Component Summary
 
 | Component | Tests | Stmts | Branch | Funcs | Lines |
 |---|---|---|--:|--:|--:|--:|
-| [engine-core](#engine-core) | 1 | 100.00% | 100.00% | 100.00% | 100.00% |
-| [catan-engine](#catan-engine) | 46 | 98.27% | 88.70% | 100.00% | 98.27% |
-| [monopoly-engine](#monopoly-engine) | 98 | 100.00% | 95.64% | 100.00% | 100.00% |
-| [scotland-yard-engine](#scotland-yard-engine) | 36 | 100.00% | 97.41% | 100.00% | 100.00% |
-| [server](#server) | 24 | 96.68% | 94.92% | 95.45% | 96.68% |
-| [web-client](#web-client) | 33 | 26.26% | 72.28% | 46.15% | 26.26% |
+| All files | — | 92.86% | 84.80% | 85.52% | 95.45% |
+| [catan-engine](#catan-engine) | 46+ | 91.96% | 83.71% | 96.82% | 97.48% |
+| [monopoly-engine](#monopoly-engine) | 98+ | 96.82% | 89.56% | 95.83% | 98.88% |
+| [scotland-yard-engine](#scotland-yard-engine) | 36+ | 98.75% | 96.29% | 100% | 100% |
+| [server](#server) | 24+ | 93.10% | 84.31% | 91.17% | 94.24% |
+| [web-client](#web-client) | 33+ | ~66–100% (per-file) | — | — | — |
 
-> The production server imports every engine package through its `index.ts`, so the full engine graph — including the data-only `positions.ts` and the `index.ts`/`types.ts` shims — is now executed (and measured) at **100%** statements. See [Known Exceptions](#known-exceptions) for the remaining gaps.
-
-## engine-core
-
-Pure type/interface definitions and static utility functions — fully exercised by all engines and the server.
-
-| File | Stmts | Branch | Funcs | Lines |
-|---|--:|--:|--:|--:|
-| `src/IGameEngine.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/index.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/types.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/utils.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
+> Coverage is reported over the files exercised by the test run's import graph (Vitest `all: false` default). Data-only/type modules (`board.ts`, `cards.ts`, `positions.ts`, `index.ts`/`types.ts` shims) that the production server imports register at or near 100% because boot-steps execute their top-level statements. Aggregate statement counts: **2018/2173 stmts, 1133/1336 branches, 254/297 funcs, 1784/1869 lines**.
 
 ## catan-engine
 
-`CatanEngine.ts` is at **100%** of statements, functions, and lines (gap-closing pass). Remaining branch misses are guard-clause short-circuits (wrong-player / wrong-phase checks).
+`CatanEngine.ts` now includes the official two-round **initial placement** reducers (`PLACE_INITIAL_SETTLEMENT` / `PLACE_INITIAL_ROAD`) — the uncovered lines are the new placement/distance-rule guard short-circuits and the `PLAY_KNIGHT` no-victim path.
 
 | File | Stmts | Branch | Funcs | Lines |
 |---|--:|--:|--:|--:|
-| `src/CatanEngine.ts` | 100.00% | 88.48% | 100.00% | 100.00% |
-| `src/board.ts` | 88.37% | 91.67% | 100.00% | 88.37% |
-| `src/index.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/types.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
+| `src/CatanEngine.ts` | 92.91% | 85.33% | 100% | 99.41% |
+| `src/board.ts` | 85.85% | 57.69% | 80% | 85.54% |
 
-Notable coverage: longest-road dethrone/tie handling, settlement placement connectivity, isValidAction phase gating, END_TURN guards, post-game award re-check.
+Notable coverage: initial-placement order (forward/reverse), distance rule, road-follows-settlement, first-roller selection, longest-road dethrone/tie handling, settlement connectivity, `isValidAction` phase gating, `END_TURN` guards, post-game award re-check.
 
 ## monopoly-engine
 
-`MonopolyEngine.ts` is at **100%** of statements, functions, and lines. Remaining branch misses are the guard short-circuits in the `reduce` pre-checks and `isValidAction`.
+`MonopolyEngine.ts` gained a dedicated `BUY_PROPERTY` `isValidAction` branch and a strict `return false` default for unknown action types. The uncovered `886-893` lines are the new guard branches.
 
 | File | Stmts | Branch | Funcs | Lines |
 |---|--:|--:|--:|--:|
-| `src/MonopolyEngine.ts` | 100.00% | 95.64% | 100.00% | 100.00% |
-| `src/board.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/cards.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/index.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/types.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
+| `src/MonopolyEngine.ts` | 96.81% | 89.56% | 95.83% | 98.87% |
 
-Notable coverage: mortgage/unmortgage guards, even-building rule, house buy/sell guards, card-deck wraps (RR/utility), trade-with-buildings blocks, mortgaged-property trade interest, PAY_PLAYERS / repairs, jail mechanics, END_TURN single-active-game-over, bankruptcy/creditor transfers, get-out-of-jail card return to deck, INVALID_ACTION_TYPE/PLAYER_NOT_FOUND paths, isValidAction build-limit and trade validation matrices.
+Notable coverage: mortgage/unmortgage guards, even-building rule, house buy/sell guards, card-deck wraps (RR/utility), trade-with-buildings blocks, mortgaged-property trade interest, jail mechanics, `END_TURN` single-active-game-over, bankruptcy/creditor transfers, get-out-of-jail card return to deck, `isValidAction` build-limit and trade validation matrices.
 
 ## scotland-yard-engine
 
-All files — including the 798-line data-only `positions.ts` — are measured at **100%** statements, because the production server imports the package `index.ts` (boot-steps execute the top-level data statements). Branch misses are guard short-circuits in the engine.
+All engine logic at 100% statements/functions/lines; branch misses are guard short-circuits.
 
 | File | Stmts | Branch | Funcs | Lines |
 |---|--:|--:|--:|--:|
-| `src/ScotlandYardEngine.ts` | 100.00% | 96.84% | 100.00% | 100.00% |
-| `src/board.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/index.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/positions.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/types.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/utils.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
+| `src/ScotlandYardEngine.ts` | 98.57% | 96.19% | 100% | 100% |
+| `src/utils.ts` | 100% | 96.66% | 100% | 100% |
+
+Notable coverage: hidden-movement per-player projection (Mr. X scrub, reveal-turn/game-over preservation), double moves, ticket flow, reveal turns, win conditions.
 
 ## server
 
-Unit + integration coverage of the full HTTP and WebSocket surface. `server.test.ts` drives `buildApp()` through real HTTP injection (`fastify.inject`) and a live WebSocket round-trip over a real `ws` client (create room → join → `ROLL_DICE` → `STATE_UPDATE`/`EVENTS`), plus error paths (400/404, close codes `1008`, `ERROR` reply, no-broadcast on invalid actions, connection cleanup on close).
+Unit + integration coverage of the full HTTP and WebSocket surface. `server.test.ts` drives `buildApp()` through real HTTP injection (`fastify.inject`) and a live WebSocket round-trip over a real `ws` client, plus error paths (400/404, close codes `1008`, `ERROR` reply, no-broadcast on invalid actions, connection cleanup).
 
 | File | Stmts | Branch | Funcs | Lines |
 |---|--:|--:|--:|--:|
-| `src/Room.ts` | 100.00% | 95.00% | 100.00% | 100.00% |
-| `src/RoomManager.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/schemas.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/server.ts` | 91.79% | 92.86% | 75.00% | 91.79% |
+| `src/Room.ts` | 97.61% | 75% | 100% | 100% |
+| `src/RoomManager.ts` | 100% | 66.66% | 100% | 100% |
+| `src/server.ts` | 88.31% | 90.90% | 76.92% | 89.33% |
 
 ## web-client
 
-React hooks/utilities are fully covered; `App`, `Lobby`, and `GameRoom` cover the production flows end-to-end with a stubbed `WebSocket` (simulated `STATE_UPDATE` / `EVENTS` / `ERROR` / close messages and socket-payload assertions). The heavier board components are left to the automated UI testing workflow (`.agents/skills/ui-testing`).
+React hooks/utilities are heavily covered; `App`, `Lobby`, and `GameRoom` cover the production flows with a stubbed `WebSocket`. `Lobby.tsx` coverage is high (93.75% stmts) after adding Online-mode and join-room tests. Heavier board components are left to the automated UI testing workflow (`.agents/skills/ui-testing`).
 
 | File | Stmts | Branch | Funcs | Lines |
 |---|--:|--:|--:|--:|
-| `src/App.tsx` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/main.tsx` | 0.00% | 0.00% | 0.00% | 0.00% |
-| `src/components/AudioToggle.tsx` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/components/GameRoom.tsx` | 68.13% | 62.35% | 100.00% | 68.13% |
-| `src/components/Lobby.tsx` | 88.44% | 70.59% | 100.00% | 88.44% |
-| `src/hooks/useEventLog.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/hooks/useGameSocket.ts` | 100.00% | 88.24% | 100.00% | 100.00% |
-| `src/hooks/useToasts.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| `src/utils/SoundEngine.ts` | 100.00% | 97.30% | 100.00% | 100.00% |
-| `vitest.setup.ts` | 100.00% | 100.00% | 100.00% | 100.00% |
-| boards/rooms: `CatanBoard`, `CatanDevCardManager`, `CatanDiscardModal`, `CatanRobberVictimModal`, `CatanRoom`, `CatanTradeManager`, `Dice3D`, `MonopolyBoard`, `PlayerToken`, `PropertyManager`, `RulebookModal`, `ScotlandYardBoard`, `ScotlandYardRoom`, `TradeManager`, `TradeNotification` | 0.00% | 0.00% | 0.00% | 0.00% |
+| `src/App.tsx` | 66.66% | 100% | 60% | 66.66% |
+| `src/components/GameRoom.tsx` | 67.79% | 57.57% | 40.38% | 68.48% |
+| `src/components/Lobby.tsx` | 93.75% | 77.77% | 92.85% | 97.72% |
+| `src/hooks/useGameSocket.ts` | 96.96% | 81.25% | 100% | 100% |
+| `src/utils/SoundEngine.ts` | 100% | 96.42% | 100% | 100% |
 
 ## Known Exceptions
 
-* **`catan-engine/src/board.ts` (~88%):** the uncovered statements are a confirmed-dead perimeter/branch (`outerEdges` port-trace, ~lines 146-169) — every board edge has exactly 2 adjacent hexes, so the branch is unreachable without source changes.
+* **`catan-engine/src/board.ts` (~86%):** a confirmed-dead perimeter branch (`outerEdges` port-trace, ~lines 146-167) — every board edge has exactly 2 adjacent hexes, so the branch is unreachable without source changes.
 * **`server/src/server.ts` `start()`:** the production entrypoint (port listener) is not covered by tests; it requires a live external process. All app logic lives in `buildApp()`, which is fully exercised through `fastify.inject` and real WebSocket clients.
-* **`web-client/src/main.tsx`:** the React entrypoint (`createRoot`) is not covered.
-* **Board/room components:** `CatanRoom`, `MonopolyBoard`, `PropertyManager`, `TradeManager`, `Dice3D`, etc. are validated through the automated UI/WebSocket QA workflow (`.agents/skills/ui-testing`) rather than unit tests. `GameRoom.test.tsx` deliberately mocks these sub-components, so their lines do not count toward `GameRoom`'s own 68% coverage.
+* **Board/room components** (`CatanRoom`, `MonopolyBoard`, `PropertyManager`, `TradeManager`, `Dice3D`, `ScotlandYardBoard`, etc.) are validated through the automated UI/WebSocket QA workflow (`.agents/skills/ui-testing`) rather than unit tests.
+* Coverage is reported on the test-run import graph only (`all: false`), so files not imported by the tests are not row-listed here.
 
 ## Contributing
 

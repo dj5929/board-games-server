@@ -198,7 +198,7 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     ws.close();
   });
 
-  it('ignores invalid actions without broadcasting', async () => {
+  it('sends ACTION_REJECTED for invalid actions without broadcasting a state change', async () => {
     const room = await createRoom({ playerCount: 2 });
     const { ws, messages } = openSocket(
       `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`
@@ -208,10 +208,34 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     await waitUntil(() => messages.length >= 1);
 
     const before = messages.length;
-    ws.send(JSON.stringify({ type: 'ROLL_DICE', playerId: 'p2' })); // not p2's turn
+    // CRITICAL-1: the server forces playerId to the socket identity (p1), so
+    // sending an invalid action (END_TURN before rolling) is rejected with feedback.
+    ws.send(JSON.stringify({ type: 'END_TURN', playerId: 'p2' }));
 
-    await new Promise(r => setTimeout(r, 100));
-    expect(messages.length).toBe(before);
+    await waitUntil(() => messages.some(m => JSON.parse(m).type === 'ACTION_REJECTED'));
+    const rejected = messages.map(m => JSON.parse(m)).filter(m => m.type === 'ACTION_REJECTED');
+    expect(rejected.length).toBeGreaterThanOrEqual(1);
+    // No extra state broadcast from the invalid action
+    expect(messages.length).toBe(before + 1);
+    ws.close();
+  });
+
+  it('forces the socket identity over a forged playerId (CRITICAL-1)', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const { ws, messages } = openSocket(
+      `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`
+    );
+    ws.on('error', () => {});
+    await waitForOpen(ws);
+    await waitUntil(() => messages.length >= 1);
+
+    // p1 is the active player. Send ROLL_DICE but impersonate p2 in the payload.
+    // The server must bind it to the socket identity (p1), so the roll succeeds.
+    ws.send(JSON.stringify({ type: 'ROLL_DICE', playerId: 'p2' }));
+
+    await waitUntil(() => messages.some(m => JSON.parse(m).type === 'STATE_UPDATE' && JSON.parse(m).state.players[0].hasRolled === true));
+    const update = messages.map(m => JSON.parse(m)).filter(m => m.type === 'STATE_UPDATE').pop()!;
+    expect(update.state.players[0].hasRolled).toBe(true);
     ws.close();
   });
 

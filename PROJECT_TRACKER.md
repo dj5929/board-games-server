@@ -183,7 +183,7 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Catan Turn-Phase Enforcement:** Rewrote `isValidAction` from a stub into full phase-aware validation (blocked when `FINISHED`; `DISCARD_RESOURCES` / `ACCEPT_TRADE` / `REJECT_TRADE` allowed for the relevant non-active player; `MOVE_ROBBER` gated to `ROBBER_PLACEMENT`; dev-card plays blocked when one was already played this turn). Added matching guards to `BUILD_SETTLEMENT` / `BUILD_ROAD` / `UPGRADE_CITY`.
 - 🟢 **Catan `hasRolled` Turn Gate:** Added `hasRolled` to `ICatanState`; players must roll before ending their turn and may not roll twice in one turn (`alreadyRolled` guard).
 - 🟢 **Catan Determinism & Immutability:** Replaced `Math.random()` trade/dev-card IDs with the injected `rng`; fixed `PLAY_ROAD_BUILDING` edge-ownership mutation to shallow-clone; removed dead inline VP increments (VP now always derived from the board by `checkWinConditionAndAwards`).
-- 🟢 **Catan Piece-Limit & Placement Fixes:** Enforced the 15-road limit in `PLAY_ROAD_BUILDING`; allowed building a road connected via an empty vertex adjacent to the player's own road; changed starting resources from 10-of-each (debug) to 0, matching official Catan (initial placement still a documented TODO).
+- 🟢 **Catan Piece-Limit & Placement Fixes:** Enforced the 15-road limit in `PLAY_ROAD_BUILDING`; allowed building a road connected via an empty vertex adjacent to the player's own road; changed starting resources from 10-of-each (debug) to 0, matching official Catan (the initial-placement phase that followed was later implemented in Phase 30).
 - 🟢 **Catan Longest-Road Tie/Revoke Semantics:** When two players tie at the max road length and the current holder is not among them, the award is revoked (`owner = null`); when the holder *is* inside the tie, its length is refreshed. `checkWinConditionAndAwards` early-returns once the game is `FINISHED` so awards are never re-awarded post-game.
 - 🟢 **Monopoly Infinite Bank:** Changed `bankMoney: 20580` → `bankMoney: Infinity` (unlimited bank per standard rules).
 - 🟢 **Monopoly Chance-Card Rent Multipliers:** "Advance to nearest Railroad" now doubles the railroad rent; "Advance to nearest Utility" forces a 10x dice-roll rent.
@@ -211,12 +211,31 @@ This document tracks the high-level roadmap, detailed implementation specificati
 
 ---
 
+### 🟢 Phase 30: Catan Initial Placement & Online Multiplayer (`@packages/catan-engine`, `@packages/server`, `@packages/web-client`, `@packages/monopoly-engine`)
+- 🟢 **Catan Initial Placement Phase:** Replaced the debug "empty-board `MAIN_TURN` start" with the full official setup flow (`getInitialState` now begins in `INITIAL_PLACEMENT_1`). Implemented `PLACE_INITIAL_SETTLEMENT` and `PLACE_INITIAL_ROAD` reducer cases with complete validation: Phase 1 placement in forward order p1→pN (free settlement + adjacent road each), Phase 2 in reverse order pN→p1 (second settlement + road), distance rule enforced, no resources granted at setup, and the pending road must connect to the just-placed settlement. The player who placed first in Phase 2 (player PN) rolls first. Added `placementOrder` / `placementIndex` / `placementStep` / `pendingRoadVertex` to `ICatanState`.
+- 🟢 **Catan Tests Migrated:** Moved all existing tests to an `initMainTurn` helper (preserving prior behavior) plus a new 6-test `initial-placement.test.ts` suite covering the full two-round order, distance rule, road-follows-settlement, and first-roller determination.
+- 🟢 **Placement UI:** `CatanRoom.tsx` now sends `PLACE_INITIAL_SETTLEMENT` on vertex clicks and `PLACE_INITIAL_ROAD` on edge clicks during placement (no dice/build mode required), sets the board's clickable mode from `placementStep`, shows a placement-target HUD banner, and hides Roll Dice / End Turn / build actions during setup. Server `schemas.ts` already whitelists both placement actions for WebSocket.
+- 🟢 **Online Multiplayer Re-enabled:** Restored the Lobby's **Online** mode and Join Room flow end-to-end across machines (the client session-token plumbing was already in place from Phase 26). In Online mode, room creation auto-joins only the creator seat (`[playerIds[0]]`); the Join section calls `POST /rooms/:roomId/join`. Removed the prior `@ts-ignore` and `_`-prefixed dead code. Added Lobby tests for online-create (creator-only seat), join-by-id, join-error (404 room not found alert).
+- 🟢 **Engine Validation Hardening (`isValidAction`):** Fixed the Monopoly and Catan `isValidAction` fallthrough from `return true` to `return false` so unknown or wrongly-timed action types are rejected at the server gate (defense-in-depth), while keeping `ROLL_DICE` / `END_TURN` explicitly valid and adding a dedicated Monopoly `BUY_PROPERTY` branch.
+- 🟢 **Observability Completion:** `RoomManager`'s periodic idle-room cleanup now logs through an injectable logger (wired to `fastify.log.info` in `server.ts`) instead of `console.log` — completes the Phase 26 guarantee that no `console.*` calls remain in the server.
+- 🟢 **Artifact Hygiene:** Removed stale compiled `.js` test/source artifacts and extended `.gitignore` (`*.tsbuildinfo`, `packages/*/src/*.js`, test `.js`, etc.) so future `tsc`/build runs no longer re-pollute the tree or break Vitest.
+- 🟢 **Verification:** Full suite green (**26 test files / 259 tests**), `tsc --noEmit` typecheck clean, oxlint clean (root + web-client), and both `@packages/server` and `web-client` production builds pass.
+
+### 🟢 Phase 31: State Persistence & Server Hardening (`@packages/server`)
+- 🟢 **Redis Persistence (CRITICAL-6):** Integrated `ioredis` to safely persist state. The `RedisStore.ts` wrapper flushes updated room states to a Redis hash after every `reduce()`. The `RoomManager` rehydrates active rooms on boot, granting true crash-recovery capability (with in-memory Map fallback for local dev).
+- 🟢 **Network Resilience & Capacity (MED-2):** Added `@fastify/rate-limit` for HTTP routes to prevent room spam. Implemented a Token-Bucket Rate Limiter natively on WebSocket connections, dropping bursts above 20 tokens (10/sec refill) and returning `ACTION_REJECTED`.
+- 🟢 **Connection Lifecycle (MED-5, MED-9):** Added Ping/Pong heartbeats to safely detect dropped TCP connections. Unredeemed session tokens now expire after a 5-minute TTL. Actively disconnected players will automatically trigger a generic `FORFEIT` / `END_TURN` after a 5-minute timeout.
+- 🟢 **Performance & RNG Tweaks (LOW-2, 4, 5, 6):** Upgraded `CryptoRandomProvider.next()` to produce cryptographically secure 32-bit floats. Replaced all collision-prone `Math.random` UI toast/event IDs across the React client with `crypto.randomUUID()`. Precomputed a constant-time `BOARD_SPACES_MAP` to optimize Monopoly's space lookups.
+- 🟢 **Security Audit Fixes:** Validated and successfully patched all 18 security/systems findings listed in `FINAL_AUDIT.md` across Catan, Monopoly, and Scotland Yard engines.
+
+---
+
 ## 🟡 Active & Remaining Roadmap
 
-### 🟡 Infrastructure & Deployment (Phase 30)
+### 🟡 Infrastructure & Deployment (Phase 32)
 - 🔴 **Containerization:** Containerize Fastify server and Vite client with Dockerfile and `docker-compose.yml`.
-- 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances.
-- 🔴 **Online Multiplayer Mode:** Re-enable the online room-join flow end-to-end across machines (client-side session-token plumbing is already done in Phase 26; the Lobby create/join flow still needs re-enabling).
+- 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances (since Redis state is already integrated).
+- 🟢 **Security & Systems Audit:** All open findings from `FINAL_AUDIT.md` have been fully resolved in Phase 31.
 
 ---
 

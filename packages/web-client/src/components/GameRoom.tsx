@@ -42,7 +42,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
   const stateTimerRef = useRef<number | null>(null);
 
   const addToast = (msg: string) => {
-    const id = Date.now() + Math.random();
+    const id = crypto.randomUUID();
     setToasts(prev => [...prev, { id, msg }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
@@ -117,7 +117,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
             }
             if (msg) {
               addToast(msg);
-              newEvents.push({ id: Date.now() + Math.random(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), msg });
+              newEvents.push({ id: crypto.randomUUID(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), msg });
             }
           });
           if (newEvents.length > 0) {

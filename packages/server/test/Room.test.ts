@@ -48,4 +48,60 @@ describe('Room', () => {
     expect(eventsUpdate.type).toBe('EVENTS');
     expect(eventsUpdate.events[0].type).toBe('DICE_ROLLED');
   });
+
+  it('closes the stale socket when a player reconnects (MED-6)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('test-room', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const staleClose = vi.fn();
+    room.addConnection('p1', { send: vi.fn(), close: staleClose });
+
+    // Reconnect the same playerId
+    room.addConnection('p1', { send: vi.fn(), close: vi.fn() });
+
+    expect(staleClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not close a connection when adding a different player', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('test-room', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const p1Close = vi.fn();
+    room.addConnection('p1', { send: vi.fn(), close: p1Close });
+    room.addConnection('p2', { send: vi.fn(), close: vi.fn() });
+
+    expect(p1Close).not.toHaveBeenCalled();
+  });
+
+  it('sends ACTION_REJECTED feedback on a rejected action (MED-4)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('test-room', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const mockSend = vi.fn();
+    room.addConnection('p1', { send: mockSend });
+    // Clear the initial STATE_UPDATE
+    mockSend.mockClear();
+
+    // p1 cannot END_TURN before rolling
+    room.dispatch({ type: 'END_TURN', playerId: 'p1' } as any);
+
+    const rejected = mockSend.mock.calls.filter(c => JSON.parse(c[0]!).type === 'ACTION_REJECTED');
+    expect(rejected).toHaveLength(1);
+    expect(JSON.parse(rejected[0]![0]!).error).toBeTruthy();
+  });
+
+  it('closes all connections via closeAllConnections (MED-1)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('test-room', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const p1Close = vi.fn();
+    const p2Close = vi.fn();
+    room.addConnection('p1', { send: vi.fn(), close: p1Close });
+    room.addConnection('p2', { send: vi.fn(), close: p2Close });
+
+    (room as any).closeAllConnections();
+
+    expect(p1Close).toHaveBeenCalledTimes(1);
+    expect(p2Close).toHaveBeenCalledTimes(1);
+  });
 });

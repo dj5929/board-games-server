@@ -353,11 +353,13 @@ describe('MonopolyEngine Phase 5/8: Missing Game Logic Fixes', () => {
     // Now p2 owns both utilities
     (nextState as any).ownership[propertyId('water')] = 'p2';
     nextState.players[0]!.position = 22; // Start closer to Water Works (pos 28)
-    const util2Rng = new DeterministicRNG([2/6, 2/6]); // yields 3 and 3 = 6
+    // Simulate a fresh turn (MED-8: a player cannot roll twice on the same turn)
+    nextState.players[0]!.hasRolled = false;
+    const util2rng = new DeterministicRNG([2/6, 2/6]); // yields 3 and 3 = 6
     // wait, if we yield doubles, they go to jail? 
     // No, only 3 doubles. But rolling doubles doesn't end turn. That's fine.
     
-    const util2State = reduceHelper(nextState, { type: 'ROLL_DICE', playerId: playerId('p1') }, util2Rng).nextState;
+    const util2State = reduceHelper(nextState, { type: 'ROLL_DICE', playerId: playerId('p1') }, util2rng).nextState;
     expect(util2State.players[0]!.position).toBe(28);
     // 2 utilities = 10x dice roll. Dice roll is 6. Rent = 60.
     expect(util2State.players[0]!.money).toBe(1500 - 20 - 60);
@@ -373,6 +375,28 @@ describe('MonopolyEngine Phase 5/8: Missing Game Logic Fixes', () => {
     const result = MonopolyEngine.reduce(state, { type: 'MORTGAGE_PROPERTY', playerId: playerId('p1'), propertyId: propertyId('baltic') }, rng);
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error).toBe('HAS_BUILDINGS');
+  });
+
+  it('should reject ROLL_DICE when the player has already rolled (MED-8)', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    // Simulate a player who has already rolled this turn
+    (state as any).players[0].hasRolled = true;
+    const res = MonopolyEngine.reduce(state, { type: 'ROLL_DICE', playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error).toBe('ALREADY_ROLLED');
+  });
+
+  it('should hide the ordered chance and chest decks via getStateForPlayer (CRITICAL-2/3)', () => {
+    const rng = new DeterministicRNG([0.5]);
+    const state = MonopolyEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    const projected = MonopolyEngine.getStateForPlayer!(state, playerId('p1'));
+    // Decks keep their length but contents are hidden
+    expect(projected.chanceDeck).toHaveLength(state.chanceDeck.length);
+    expect(projected.chestDeck).toHaveLength(state.chestDeck.length);
+    expect(projected.chanceDeck).not.toEqual(state.chanceDeck);
+    expect(projected.chanceDeck.every(c => c === 'HIDDEN')).toBe(true);
+    expect(projected.chestDeck.every(c => c === 'HIDDEN')).toBe(true);
   });
 });
 

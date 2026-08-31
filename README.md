@@ -8,7 +8,7 @@ A modular, real-time, multiplayer board game platform that plays classic board g
 
 Games currently implemented:
 - 🎩 **Monopoly** — complete ruleset: property management, trading, jail, bankruptcy, Chance/Community Chest cards. (2–8 players)
-- 🐑 **Catan** — hex-grid building, resource management, maritime trading, robber, development cards, awards, win conditions. (3–4 players)
+- 🐑 **Catan** — hex-grid building with official two-round initial placement, resource management, maritime trading, robber, development cards, awards, win conditions. (3–4 players)
 - 🕵️ **Scotland Yard** — hidden movement on a London map graph, ticket tracking, and Mr. X reveal mechanics, including a shared-board hot-seat mode where Mr. X's location stays hidden from detectives until a reveal turn. (3–6 players)
 
 ---
@@ -16,7 +16,7 @@ Games currently implemented:
 ## ✨ Highlights
 
 - **Pure, deterministic game engines** — each engine is an immutable state machine (a `reducer(state, action)`), making gameplay rules fully unit-testable and free of hidden side effects.
-- **Real-time multiplayer** — WebSocket-driven rooms with crypto-random room IDs and per-session tokens to keep connections secure.
+- **Real-time multiplayer** — WebSocket-driven rooms with crypto-random room IDs and per-session tokens to keep connections secure. Both **hot-seat** (local) and **online** (join rooms by ID from another machine) modes are fully playable.
 - **Per-game player rules** — the Lobby's player selector adapts to each game's official range (Monopoly 2–8, Catan 3–4, Scotland Yard 3–6), enforced at both the server and engine layers.
 - **Defense in depth validation** — the same Zod schemas validate every action on both the client *and* the server.
 - **Polish** — a rich React UI with contextual HUDs, animated tokens, procedural Web Audio sound effects, and a live event log.
@@ -144,6 +144,7 @@ This project uses different TypeScript versions in different packages intentiona
 
 ## 🛠️ Features
 - **Real-Time Multiplayer**: WebSocket synchronization for instant action reflection, secured per-room session tokens (crypto-random room IDs + token-verified connections).
+- **State Persistence & Resilience**: Built-in Redis support for server crash-recovery, HTTP rate limiting, Token-Bucket WebSocket throttling, and Ping/Pong heartbeat disconnect/forfeit management.
 - **Strict Validation**: Zod schemas used to validate every action both on the server and client.
 - **Audio & Visual Polish**: Procedural Web Audio effects, dynamic 3D CSS dice rolls, and animated tokens.
 - **Interactive UI**: Rich contextual HUDs, robust trading modals, property management interfaces, and a dynamic event log.
@@ -156,6 +157,13 @@ This project uses different TypeScript versions in different packages intentiona
 Workspace is an npm monorepo; install once from the root with `npm install`. See the [Quick Start](#quick-start) table above for common commands.
 
 The server binds `http://localhost:3000`, serves CORS only to the Vite dev client (`localhost:5173`), and requires a valid `?playerId=` + `token=` pair for every WebSocket room connection.
+
+## 🧭 Engineering Docs
+
+- **[FINAL_AUDIT.md](./FINAL_AUDIT.md)** — Consolidated security & systems audit. Cross-references [AUDIT_REPORT.md](./AUDIT_REPORT.md), [DEEP_AUDIT_REPORT.md](./DEEP_AUDIT_REPORT.md), and [SECURITY_AUDIT_REPORT.md](./SECURITY_AUDIT_REPORT.md). *Note: Phase 31 has fully resolved the open findings in this audit.*
+- **[FIXES.md](./FIXES.md)** — Identified bugs, planned improvements, and implementation diffs.
+- **[COVERAGE.md](./COVERAGE.md)** — Test coverage matrix for all components.
+- **[PROJECT_TRACKER.md](./PROJECT_TRACKER.md)** — High-level roadmap, phase-by-phase implementation status, and completion state.
 
 ## 📄 License
 

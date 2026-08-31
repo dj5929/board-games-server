@@ -96,6 +96,59 @@ This document tracks identified bugs, type safety issues, and planned improvemen
    5. Migrated the ~25 Catan 2-player tests to 3 players (with turn-cycle fixes) and added validation tests at both engine and server layers, plus Lobby dropdown-range tests.
 - **Status:** ✅ Fixed - full suite green (250 tests), typecheck and lint clean.
 
+### 13. Catan Initial Placement Phase Not Implemented
+- **Location:** `packages/catan-engine/src/CatanEngine.ts` (`getInitialState`, `reduce`), `packages/catan-engine/src/types.ts`, `packages/server/src/schemas.ts`, `packages/web-client/src/components/CatanRoom.tsx`
+- **Issue:** The game started directly in `MAIN_TURN` with an empty board (a documented simplification). The `PLACE_INITIAL_SETTLEMENT` / `PLACE_INITIAL_ROAD` action types were defined but had no reducer handler, so the official setup was unimplemented.
+- **Fix:**
+   1. `getInitialState` now begins in `INITIAL_PLACEMENT_1` and initializes `placementOrder` / `placementIndex` / `placementStep` / `pendingRoadVertex`.
+   2. Added `PLACE_INITIAL_SETTLEMENT` and `PLACE_INITIAL_ROAD` reducer cases with full validation: Phase 1 forward order p1→pN (free settlement + adjacent road), Phase 2 reverse order pN→p1 (second settlement + road), distance rule enforced, no resources granted, pending road must connect to the just-placed settlement; player who placed first in Phase 2 (player PN) rolls first.
+   3. `schemas.ts` whitelists both new actions for WebSocket.
+   4. `CatanRoom.tsx` sends the placement actions on vertex/edge clicks during setup and shows a placement-target HUD banner (dice/build actions hidden).
+- **Status:** ✅ Fixed — existing tests migrated to an `initMainTurn` helper; new 6-test `initial-placement.test.ts` suite added. Full suite green (259 tests), typecheck and lint clean. See Phase 30 in the tracker.
+
+### 14. Online Multiplayer UI Still Disabled in Lobby
+- **Location:** `packages/web-client/src/components/Lobby.tsx`
+- **Issue:** Online mode (and the Join Room flow) had been temporarily disabled to isolate hot-seat testing; the Lobby still carried `@ts-ignore` and `_`-prefixed dead code from that period. The server join endpoint and client session-token plumbing existed (Phase 26) but the Lobby never wired them back up.
+- **Fix:** Re-enabled the **Online** button and Join section. In Online mode, room creation auto-joins only the creator seat (`[playerIds[0]]`); Join inputs a room ID and calls `POST /rooms/:roomId/join`. Removed the `@ts-ignore` and dead `_` code via a clean rewrite.
+- **Status:** ✅ Fixed — added Lobby tests for online-create (creator-only seat), join-by-id, and join-error (404 room-not-found alert). Full suite green (259 tests).
+
+### 15. `isValidAction` Fallthrough Accepted Unknown Action Types (Monopoly/Catan)
+- **Location:** `packages/monopoly-engine/src/MonopolyEngine.ts` (`isValidAction`), `packages/catan-engine/src/CatanEngine.ts` (`isValidAction`)
+- **Issue:** Both engines' `isValidAction` ended with `default: return true` (or an equivalent catch-all), meaning action types not explicitly validated were silently accepted at the server's dispatch gate.
+- **Fix:** Changed the fallthrough default to `return false` in both engines. In Monopoly this required moving `ROLL_DICE`/`END_TURN` to explicit returns (`!hasRolled` / `hasRolled`) and adding a dedicated `BUY_PROPERTY` branch (space is a purchasable unowned property the player can afford).
+- **Status:** ✅ Fixed — full suite green (259 tests), typecheck and lint clean.
+
+### 16. RoomManager Idle-Cleanup Used `console.log` (Observability Gap)
+- **Location:** `packages/server/src/RoomManager.ts`, `packages/server/src/server.ts`
+- **Issue:** The periodic idle-room cleanup logged via `console.log`, the last remaining `console.*` call outside `fastify.log` (contradicting Phase 26's observability guarantee).
+- **Fix:** `RoomManager` now takes an injectable logger (defaulting to `console`); `server.ts` wires it to `fastify.log.info` in `buildApp`.
+- **Status:** ✅ Fixed — no stray `console.*` remains in server source.
+
+### 17. Stale Compiled `.js` Artifacts Re-Entered the Tree (from `tsc -b`)
+- **Location:** root (`tsconfig.tsbuildinfo`, `vitest.config.js`), `packages/*/src/*.js`, `packages/*/{test,__tests__}/*.js`
+- **Issue:** Running `tsc -b` (e.g. web-client build) emitted compiled `.js`/`.d.ts` files next to their `.ts` sources, and root `tsc -b` could re-emit stale `.js` test files that Vitest then picked up and crashed on (the Phase 25 failure mode recurring).
+- **Fix:** Deleted the emitted artifacts and extended `.gitignore` to exclude `*.tsbuildinfo`, `packages/*/src/*.js`, and the test `.js` patterns, so future builds never re-pollute the tree.
+- **Status:** ✅ Fixed - full suite green (26 files / 259 tests).
+
+### 18. Security & Integrity Hardening (Final Audit Findings)
+- **Location:** `packages/server/src/server.ts`, `packages/server/src/Room.ts`, `packages/server/src/RoomManager.ts`, `packages/server/src/schemas.ts`, `packages/{catan,monopoly,scotland-yard}-engine/src/*Engine.ts`, `packages/catan-engine/src/types.ts`
+- **Issue:** The `FINAL_AUDIT.md` findings (CRITICAL-1/2/3/4/5, MED-1/4/6/7/8, LOW-1, LOW-10) were open.
+- **Fix:**
+  1. **CRITICAL-1 (player impersonation):** The WebSocket handler now forces `action.playerId = <authenticated socket playerId>` before dispatch, ignoring any client-supplied value.
+  2. **CRITICAL-2/3 (hidden-information leak):** Added `getStateForPlayer` to `CatanEngine` and `MonopolyEngine`. Catan hides opponents' dev-card details and the ordered dev deck. Monopoly hides the ordered chance/chest decks (count only). `Room.broadcastState` already projects per-connection via `getStateForPlayer` (Scotland Yard had it; the others now do too).
+  3. **CRITICAL-4 (Road Building connectivity):** `PLAY_ROAD_BUILDING` now enforces that the first road connects to the player's network and the second connects to the network or the first road. Built the shared `isEdgeConnectedToNetwork` helper reused by `BUILD_ROAD`.
+  4. **CRITICAL-5 (game-agnostic schema):** Split `actionSchema` into `monopolyActionSchema`, `catanActionSchema`, `scotlandYardActionSchema`, exposed as `actionSchemaByGame`. The server validates against the schema matching the room's `gameType`.
+  5. **MED-1 (socket leak on idle cleanup):** `RoomManager` now calls `room.closeAllConnections()` before removing idle rooms.
+  6. **MED-4 (silent rejection):** `Room.dispatch` now sends an `ACTION_REJECTED` message with the error back to the offending client.
+  7. **MED-6 (orphaned sockets on reconnect):** `Room.addConnection` closes the stale socket for a `playerId` before replacing it.
+  8. **MED-7 (SY identity check):** `ScotlandYardEngine.isValidAction` now asserts `action.playerId === activePlayerId`.
+  9. **MED-8 (Monopoly double-roll):** `ROLL_DICE` reducer rejects with `ALREADY_ROLLED` when the current player has already rolled.
+  10. **LOW-1 (schema strictness):** `DISCARD_RESOURCES` resource counts are `.int().nonnegative()`; Monopoly trade money is `.int().nonnegative()`; Catan `TRADE_BANK` amount is `.int().positive()`.
+  11. **LOW-10 (dev-card shared reference):** `CatanEngine.reduce` deep-copies development cards while cloning players, so `END_TURN`'s `boughtThisTurn = false` no longer mutates shared references.
+- **Status:** ✅ Fixed — added tests (server identity binding, ACTION_REJECTED, socket-close-on-reconnect/cleanup, schema per-game strictness, Catan Road Building connectivity + projections, Monopoly double-roll + projections, SY identity, Catan dev-card immutability). Full suite green (26 files / 284 tests), typecheck, lint, server build, and web-client `tsc -b` + tests all green.
+
+---
+
 ## 🔴 Planned Improvements & Known Issues
 
 ### 🔴 CRITICAL: `npm test` Pipeline Broken (Stale Artifacts + Failing Assertions)
@@ -423,7 +476,7 @@ isValidAction(currentState, action): boolean {
 ### 🟡 MEDIUM: Catan Initial Placement Phase Not Implemented
 - **Location:** `packages/catan-engine/src/CatanEngine.ts` (line 169)
 - **Issue:** Game starts in `MAIN_TURN` but types define `INITIAL_PLACEMENT_1`/`INITIAL_PLACEMENT_2`. Actions `PLACE_INITIAL_SETTLEMENT` and `PLACE_INITIAL_ROAD` have no handler in `reduce`.
-- **Status:** Deliberate simplification per inline comment. Needs proper implementation for production.
+- **Status:** ✅ Resolved — implemented in Phase 30 (see Completed Fix #13 above). Game now begins in `INITIAL_PLACEMENT_1` with `PLACE_INITIAL_SETTLEMENT` / `PLACE_INITIAL_ROAD` reducers, a new `initial-placement.test.ts` suite, and placement UI.
 
 ---
 
@@ -443,3 +496,93 @@ isValidAction(currentState, action): boolean {
 - **Location:** `packages/scotland-yard-engine/src/types.ts` (line 22)
 - **Issue:** `winner?: PlayerRole` is Scotland Yard-specific and not part of `IGameState`. Works fine via structural typing but is inconsistent with other engines.
 - **Status:** Cosmetic inconsistency.
+
+---
+
+## 📝 Proposed Fixes for Final Audit Findings
+
+The following fixes address the verified open issues outlined in `FINAL_AUDIT.md`.
+**Update (Security & Integrity Hardening pass):** most findings below are now implemented — see Completed Fix #18 above. Items still marked **NOT YET DONE** remain open.
+
+### 🔴 CRITICAL: Player Impersonation (CRITICAL-1)
+- **Location:** `packages/server/src/server.ts`
+- **Issue:** The WebSocket message handler does not cross-reference the `playerId` inside the JSON payload against the socket's authenticated session identity.
+- **Proposed Fix:** Extract `playerId` from the verified session token upon WS connection. Force `action.playerId = session.playerId` before passing the action to `room.dispatch(action)`, ignoring any client-provided `playerId`.
+- **Status:** ✅ Done
+
+### 🔴 CRITICAL: Hidden Information Broadcast (CRITICAL-2 & CRITICAL-3)
+- **Location:** `packages/server/src/Room.ts`, `CatanEngine.ts`, `MonopolyEngine.ts`
+- **Issue:** Raw authoritative state and events are broadcasted to all clients, leaking dev card decks, chance decks, and hidden events.
+- **Proposed Fix:** Implement `getStateForPlayer` in `CatanEngine` and `MonopolyEngine` to scrub decks (replace with counts) and hide opponents' private cards. Update `Room.ts` to implement `getEventsForPlayer` (or filter prior to broadcast) and filter private events (like `STOLEN_RESOURCE` details) before broadcasting.
+- **Status:** ✅ State projection done (`getStateForPlayer` added to both engines; `Room` already broadcasts per-connection projections). Per-player *event* filtering was not added — Catan/Monopoly events are public by game rules and Scotland Yard already scrubs Mr. X's position inside its `PLAYER_MOVED` event.
+
+### 🔴 CRITICAL: Catan `PLAY_ROAD_BUILDING` Missing Connectivity Validation (CRITICAL-4)
+- **Location:** `packages/catan-engine/src/CatanEngine.ts`
+- **Issue:** `PLAY_ROAD_BUILDING` skips connectivity validation.
+- **Proposed Fix:** Extract connectivity validation from `BUILD_ROAD` into a helper function. Enforce that the first road connects to the existing network, and the second road connects to the network OR the newly placed first road.
+- **Status:** ✅ Done
+
+### 🔴 CRITICAL: Game-Agnostic Zod Schema (CRITICAL-5)
+- **Location:** `packages/server/src/schemas.ts`
+- **Issue:** A single discriminated union for all three games allows wrong-game or under-specified actions.
+- **Proposed Fix:** Split `actionSchema` into game-specific schemas (`catanActionSchema`, `monopolyActionSchema`, `scotlandYardActionSchema`). Have the server validate against the specific schema matching the room's `gameType`. 
+- **Status:** ✅ Done
+
+### 🔴 CRITICAL: No Persistence / Crash-Recovery (CRITICAL-6)
+- **Location:** `packages/server/src/RoomManager.ts`
+- **Issue:** State is entirely in-memory.
+- **Proposed Fix:** Integrate Redis. Write the serialized `gameState`, event log, and player map to a Redis hash on every `reduce()`. On startup, `RoomManager` should rehydrate rooms from Redis.
+
+### 🟠 HIGH: WebSocket Rate Limiting & Room Capacity (MED-2, MED-3)
+- **Location:** `packages/server/src/server.ts`, `RoomManager.ts`
+- **Issue:** No limits on room creation or WebSocket actions, creating DoS vectors.
+- **Proposed Fix:** Integrate `@fastify/rate-limit` for HTTP endpoints. Implement a token-bucket rate limiter per WebSocket connection. Cap `RoomManager.rooms.size` at a sensible limit (e.g., 10,000 rooms).
+- **Status:** ⚠️ MED-3 done (room cap `MAX_ROOMS = 10000` added). MED-2 (WebSocket/HTTP rate limiting) **NOT YET DONE**.
+
+### 🟠 HIGH: Socket Connection Leaks & Session Reconnection (MED-1, MED-6)
+- **Location:** `packages/server/src/RoomManager.ts`, `Room.ts`
+- **Issue:** Idle rooms are deleted but sockets aren't closed. Reconnections orphan old sockets.
+- **Proposed Fix:** In `RoomManager` cleanup, iterate `room.connections.values()` and call `.close()` before deleting the room. In `Room.addConnection`, explicitly `close()` the existing socket for that `playerId` before replacing it.
+- **Status:** ✅ Done
+
+### 🟠 HIGH: Unbounded Session-Token Claims & Stalled Disconnects (MED-5, MED-9)
+- **Location:** `packages/server/src/server.ts`, `Room.ts`
+- **Issue:** Session tokens never expire if unredeemed. Disconnected players stall the game indefinitely.
+- **Proposed Fix:** Add a TTL to reserved session tokens. Add a heartbeat (ping/pong) to WS connections to detect drops. Implement a forfeit timer (e.g., 5 mins) that skips a disconnected player's turn or transitions them to a forfeit state.
+- **Status:** ⚠️ **NOT YET DONE**
+
+### 🟡 MEDIUM: Action Guard Flaws (MED-7, MED-8, LOW-9)
+- **Location:** `ScotlandYardEngine.ts`, `MonopolyEngine.ts`
+- **Issue:** Scotland Yard action guard lacks active player identity check. Monopoly `ROLL_DICE` lacks `hasRolled` check. Monopoly gets stuck in 'LOBBY'.
+- **Proposed Fix:** 
+  - Scotland Yard: add `if (action.playerId !== currentState.activePlayerId) return false;`. 
+  - Monopoly: add `if (currentPlayer.hasRolled) return { success: false, error: 'Already rolled' };` inside the `ROLL_DICE` reducer. Add a status transition from 'LOBBY' to 'IN_PROGRESS' when initialization is complete.
+- **Status:** ✅ MED-7 & MED-8 done. LOW-9 (Monopoly LOBBY → IN_PROGRESS transition) **NOT YET DONE**.
+
+### 🟡 MEDIUM: Silent Action Rejection (MED-4)
+- **Location:** `packages/server/src/Room.ts`
+- **Issue:** Reducer rejections are returned silently.
+- **Proposed Fix:** When `room.dispatch(action)` returns `{ success: false, error }`, send an `{ type: 'ACTION_REJECTED', error }` message directly back to the offending client so the UI can display a toast.
+- **Status:** ✅ Done
+
+### 🔵 LOW: Zod Schema Strictness (LOW-1)
+- **Location:** `packages/server/src/schemas.ts`
+- **Issue:** `DISCARD_RESOURCES` accepts negative numbers, `TRADE_BANK` accepts floats.
+- **Proposed Fix:** Use `.int().nonnegative()` for `DISCARD_RESOURCES` values and `.int().positive()` for `TRADE_BANK` amounts.
+- **Status:** ✅ Done
+
+### 🔵 LOW: Catan Dev-Card Immutability (LOW-10)
+- **Location:** `packages/catan-engine/src/CatanEngine.ts`
+- **Issue:** Mutating `boughtThisTurn = false` on a shared reference in `END_TURN`.
+- **Proposed Fix:** In `END_TURN`, map the array to deep-copy the cards: `activePlayer.developmentCards = activePlayer.developmentCards.map(c => ({ ...c, boughtThisTurn: false }))`.
+- **Status:** ✅ Done — cards are deep-copied during the player clone in `reduce`, so the shared reference is broken at the source.
+
+### 🔵 LOW: Performance & Randomness Tweaks (LOW-2, LOW-3, LOW-4, LOW-5, LOW-6)
+- **Location:** Server, Web Client, Engines
+- **Issue:** Coarse RNG, exponential DFS memo, linear find, Math.random for IDs.
+- **Proposed Fix:** 
+  - Use `crypto.randomUUID()` for unique IDs instead of `Math.random` (LOW-5, LOW-6).
+  - Precompute a `Map<string, BoardSpace>` for Monopoly spaces instead of using `.find()` on arrays (LOW-4).
+  - Use a higher precision RNG for server shuffling (LOW-2).
+- **Status:** ⚠️ **NOT YET DONE**
+

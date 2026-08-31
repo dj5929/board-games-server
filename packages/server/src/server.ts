@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { roomManager } from './RoomManager';
 import { Room } from './Room';
 import { MonopolyEngine } from '@packages/monopoly-engine';
@@ -8,11 +9,17 @@ import { CatanEngine } from '@packages/catan-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
 import type { IGameEngine, IGameState, IPlayerAction, IGameEvent } from '@packages/engine-core';
 import { GAME_CONFIGS, isGameType } from '@packages/engine-core';
-import { actionSchema } from './schemas';
+import { actionSchemaByGame } from './schemas';
 import crypto from 'node:crypto';
 
 const CryptoRandomProvider = {
-  next: () => crypto.randomInt(0, 1000000) / 1000000
+  next: () => crypto.randomBytes(4).readUInt32LE(0) / 0xffffffff
+};
+
+export const ENGINES: Record<string, IGameEngine<IGameState, IPlayerAction, IGameEvent>> = {
+  'monopoly': MonopolyEngine,
+  'catan': CatanEngine,
+  'scotland-yard': ScotlandYardEngine
 };
 
 export const buildApp = (logger: boolean = true) => {
@@ -20,6 +27,7 @@ export const buildApp = (logger: boolean = true) => {
   roomManager.setLogger({ log: (msg: string) => fastify.log.info(msg) });
 
   fastify.register(cors, { origin: ['http://localhost:5173'] });
+  fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
   fastify.register(fastifyWebsocket);
 
   fastify.post<{ Body: { playerCount?: number; gameType?: string } }>('/rooms', async (request, reply) => {
@@ -44,13 +52,7 @@ export const buildApp = (logger: boolean = true) => {
 
     const roomId = crypto.randomUUID();
 
-    const engines: Record<string, IGameEngine<IGameState, IPlayerAction, IGameEvent>> = {
-      'monopoly': MonopolyEngine,
-      'catan': CatanEngine,
-      'scotland-yard': ScotlandYardEngine
-    };
-
-    const engine = engines[gameType];
+    const engine = ENGINES[gameType];
     if (!engine) {
       return reply.status(400).send({ error: 'Unknown game type' });
     }
@@ -106,22 +108,57 @@ export const buildApp = (logger: boolean = true) => {
       }
 
       room.addConnection(playerId, {
-        send: (data: string) => socket.send(data)
+        send: (data: string) => socket.send(data),
+        close: () => socket.close()
       });
       fastify.log.info(`[WS] Connection established for room ${roomId} player ${playerId}`);
 
+      const actionSchema = actionSchemaByGame[room.gameType as keyof typeof actionSchemaByGame];
+      if (!actionSchema) {
+        socket.close(1008, 'Unsupported game type');
+        return;
+      }
+
+      let wsTokens = 10;
+      let lastRefill = Date.now();
+      
+      let isAlive = true;
+      socket.on('pong', () => { isAlive = true; });
+      const pingInterval = setInterval(() => {
+        if (!isAlive) {
+          socket.terminate();
+          clearInterval(pingInterval);
+          return;
+        }
+        isAlive = false;
+        socket.ping();
+      }, 30000);
+
       socket.on('message', (message: string) => {
+        const now = Date.now();
+        wsTokens += Math.floor((now - lastRefill) / 1000) * 10; // refill 10 tokens per sec
+        if (wsTokens > 20) wsTokens = 20; // max burst 20
+        lastRefill = now;
+        
+        if (wsTokens <= 0) {
+           socket.send(JSON.stringify({ type: 'ERROR', error: 'Rate limit exceeded' }));
+           return;
+        }
+        wsTokens -= 1;
+
         try {
           const parsed = JSON.parse(message.toString());
           const action = actionSchema.parse(parsed);
-          // Dispatch the action to the room
-          room.dispatch(action as Parameters<typeof room.dispatch>[0]);
+          // CRITICAL-1: force playerId to the authenticated socket identity,
+          // ignoring any client-supplied value to prevent impersonation.
+          room.dispatch({ ...(action as object), playerId } as Parameters<typeof room.dispatch>[0]);
         } catch {
           socket.send(JSON.stringify({ type: 'ERROR', error: 'Invalid payload' }));
         }
       });
 
       socket.on('close', (code, reason) => {
+        clearInterval(pingInterval);
         fastify.log.info(`[WS] Connection closed for room ${roomId} player ${playerId}. Code: ${code}, Reason: ${reason}`);
         room.removeConnection(playerId);
       });
@@ -136,6 +173,7 @@ export const buildApp = (logger: boolean = true) => {
 };
 
 export const start = async () => {
+  await roomManager.initFromRedis(ENGINES);
   const fastify = buildApp(false);
   try {
     await fastify.listen({ port: 3000 });

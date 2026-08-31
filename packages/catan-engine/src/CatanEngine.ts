@@ -62,6 +62,29 @@ function calculateLongestRoad(playerId: PlayerId, board: ICatanState['board']): 
   return maxLength;
 }
 
+// Checks whether an edge is connected to an existing network owned by the player,
+// optionally counting another edge (edgeId2) that is being placed in the same action
+// as part of the network to allow chained placement (e.g. Road Building).
+function isEdgeConnectedToNetwork(
+  board: ICatanState['board'],
+  edgeId: string,
+  playerId: PlayerId,
+  additionallyOwned: string[] = []
+): boolean {
+  const owned = new Set<string>(additionallyOwned);
+  for (const vId of boardGraph.edges[edgeId]!.adjacentVertices) {
+    const v = board.vertices[vId];
+    if (v && v.owner === playerId) return true;
+  }
+  for (const vId of boardGraph.edges[edgeId]!.adjacentVertices) {
+    for (const adjEdgeId of boardGraph.vertices[vId]!.adjacentEdges) {
+      if (owned.has(adjEdgeId)) return true;
+      if (board.edges[adjEdgeId]?.owner === playerId) return true;
+    }
+  }
+  return false;
+}
+
 function checkWinConditionAndAwards(nextState: MutableCatanState, events: ICatanEvent[]) {
   if (nextState.status === 'FINISHED') return;
 
@@ -203,7 +226,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
     const nextPlayers = currentState.players.map(p => ({ 
       ...p, 
       resources: { ...p.resources },
-      developmentCards: [...p.developmentCards],
+      developmentCards: p.developmentCards.map(c => ({ ...c })),
       playedDevelopmentCards: [...p.playedDevelopmentCards]
     }));
     const activePlayer = nextPlayers[activePlayerIndex]!;
@@ -520,23 +543,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         if (!edge) return { success: false, error: 'Invalid edge' };
         if (edge.owner) return { success: false, error: 'Edge already occupied' };
 
-        const adjacentVertices = boardGraph.edges[edgeId]!.adjacentVertices;
-        let isConnected = false;
-        
-        for (const vId of adjacentVertices) {
-          const v = nextBoard.vertices[vId];
-          if (v && v.owner === action.playerId) {
-            isConnected = true;
-            break;
-          }
-          if (!v || v.owner === null || v.owner === action.playerId) {
-            const adjEdges = boardGraph.vertices[vId]!.adjacentEdges;
-            if (adjEdges.some(adjE => nextBoard.edges[adjE]?.owner === action.playerId)) {
-              isConnected = true;
-              break;
-            }
-          }
-        }
+        const isConnected = isEdgeConnectedToNetwork(nextBoard, edgeId, action.playerId);
         
         const playerHasAnyBuildings = Object.values(nextBoard.vertices).some(v => v.owner === action.playerId);
         if (playerHasAnyBuildings && !isConnected) {
@@ -838,16 +845,31 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         const playerRoads = Object.values(nextBoard.edges).filter(e => e.owner === action.playerId).length;
         const edges = [action.edgeId1];
         if (action.edgeId2) edges.push(action.edgeId2);
-        
+
+        // Validate uniqueness, existence and ownership
+        if (new Set(edges).size !== edges.length) {
+          return { success: false, error: 'Duplicate road placement' };
+        }
         for (const edgeId of edges) {
           const edge = nextBoard.edges[edgeId];
           if (!edge) return { success: false, error: `Invalid edge ${edgeId}` };
           if (edge.owner) return { success: false, error: `Edge ${edgeId} already occupied` };
-          // Need to check connectivity, but it gets complex if building two at once where second connects to first.
-          // For now, allow it without deep checks if it's too much, but let's do a simple check.
-          // We can just add them for MVP, but to be safe:
         }
-        
+
+        // CRITICAL-4: enforce connectivity. The first road must connect to the
+        // player's existing network; the second may connect to the network OR
+        // to the just-placed first road.
+        const playerHasAnyRoads = Object.values(nextBoard.edges).some(e => e.owner === action.playerId);
+        const playerHasAnyBuildings = Object.values(nextBoard.vertices).some(v => v.owner === action.playerId);
+        if (playerHasAnyRoads || playerHasAnyBuildings) {
+          if (!isEdgeConnectedToNetwork(nextBoard, edges[0]!, action.playerId)) {
+            return { success: false, error: 'First road must connect to your network' };
+          }
+          if (edges.length === 2 && !isEdgeConnectedToNetwork(nextBoard, edges[1]!, action.playerId, [edges[0]!])) {
+            return { success: false, error: 'Second road must connect to your network or the first road' };
+          }
+        }
+
         // Enforce 15-road limit
         if (playerRoads + edges.length > 15) {
           return { success: false, error: 'Maximum roads reached' };
@@ -953,5 +975,20 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
       default:
         return false;
     }
+  },
+
+  getStateForPlayer(currentState: Readonly<ICatanState>, playerId: PlayerId): ICatanState {
+    // CRITICAL-2/3: hide hidden information for each player.
+    // - opp's development cards: expose only the count (not id/type/boughtThisTurn)
+    // - devCardDeck: expose only the remaining count (not the ordered contents)
+    return {
+      ...currentState,
+      devCardDeck: Array.from({ length: currentState.devCardDeck.length }, () => 'HIDDEN' as DevCardType),
+      players: currentState.players.map(p =>
+        p.id === playerId
+          ? p
+          : { ...p, developmentCards: p.developmentCards.map(() => ({ id: 'HIDDEN', type: 'KNIGHT' as DevCardType, boughtThisTurn: false })) }
+      )
+    };
   }
 };

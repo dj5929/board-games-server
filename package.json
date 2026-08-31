@@ -13,9 +13,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
+    "@types/ioredis-mock": "^8.2.8",
     "@types/node": "^26.2.0",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.11",
+    "ioredis-mock": "^8.13.1",
     "oxlint": "^1.80.0",
     "typescript": "^5.3.3",
     "vitest": "^4.1.11",

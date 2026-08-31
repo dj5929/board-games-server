@@ -44,7 +44,7 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
   const wsRef = useRef<WebSocket | null>(null);
 
   const addToast = (msg: string) => {
-    const id = Date.now() + Math.random();
+    const id = crypto.randomUUID();
     setToasts(prev => [...prev, { id, msg }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
@@ -122,7 +122,7 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
           if (msg) {
             addToast(msg);
             setEventLog(prev => [...prev, {
-              id: Date.now() + Math.random(),
+              id: crypto.randomUUID(),
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
               msg
             }]);

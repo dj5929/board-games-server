@@ -84,6 +84,9 @@ export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardActi
   isValidAction(currentState: Readonly<ScotlandYardState>, action: Readonly<ScotlandYardAction>): boolean {
     if (currentState.status !== 'IN_PROGRESS') return false;
 
+    // MED-7: assert action.playerId matches the active player for MOVE/DOUBLE_MOVE
+    if (action.playerId !== currentState.activePlayerId) return false;
+
     const player = currentState.players.find(p => p.id === currentState.activePlayerId);
     if (!player) return false;
 

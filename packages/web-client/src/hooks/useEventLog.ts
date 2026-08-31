@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 
 export interface EventLogEntry {
-  id: number;
+  id: string;
   time: string;
   msg: string;
 }
@@ -13,7 +13,7 @@ export function useEventLog(maxEntries = 50) {
   const addEventLog = useCallback((msg: string) => {
     if (!msg) return;
     setEventLog(prev => [{
-      id: Date.now() + Math.random(),
+      id: crypto.randomUUID(),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       msg
     }, ...prev].slice(0, maxEntries));
@@ -24,8 +24,8 @@ export function useEventLog(maxEntries = 50) {
     if (validMessages.length === 0) return;
     
     setEventLog(prev => {
-      const newEntries = validMessages.map((msg, i) => ({
-        id: Date.now() + Math.random() + i,
+      const newEntries = validMessages.map((msg) => ({
+        id: crypto.randomUUID(),
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         msg
       }));

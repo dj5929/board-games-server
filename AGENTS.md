@@ -1,8 +1,9 @@
 # Universal Multiplayer Board Game Platform (Agent Rules)
 
-**Current Focus:** Remaining Roadmap — Infrastructure & Deployment (Phase 30: containerization, Redis scaling, online multiplayer)
+**Current Focus:** Remaining Roadmap — Infrastructure & Deployment (Phase 32: Containerization; Phase 31 Redis persistence & server hardening completed)
 **Tracker:** See [PROJECT_TRACKER.md](./PROJECT_TRACKER.md) for roadmap and status.
 **Fixes:** See [FIXES.md](./FIXES.md) for identified issues, planned improvements, and implementation diffs.
+**Audits:** The consolidated security & systems audit is [FINAL_AUDIT.md](./FINAL_AUDIT.md). All 18 findings cataloged across the codebase have now been verified and fully fixed in Phase 31.
 **Coverage:** See [COVERAGE.md](./COVERAGE.md) for the test coverage matrix of all components. Regenerate with `npm run test:cov`.
 
 ## Agent Rules & Guidelines

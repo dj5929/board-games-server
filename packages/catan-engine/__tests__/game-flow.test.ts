@@ -462,6 +462,53 @@ describe('CatanEngine - Development Cards', () => {
 
     applyExpectFail(state, { type: 'PLAY_ROAD_BUILDING', playerId: p1, edgeId1: eIds[15]! }, rng, 'Maximum roads reached');
   });
+
+  it('rejects a first Road Building road that is not connected to the network (CRITICAL-4)', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = initMainTurn([p1, p2, p3], rng);
+    (state as any).players[0].developmentCards = [{ id: 'rb1', type: 'ROAD_BUILDING', boughtThisTurn: false }];
+
+    // Give p1 a single settlement so they have a "network" to connect to
+    const eIds = Object.keys(state.board.edges);
+    const vertexId = Object.keys(boardGraph.vertices).find(vId =>
+      boardGraph.vertices[vId]!.adjacentEdges.some(eId => eIds.includes(eId))
+    )!;
+    (state as any).board.vertices[vertexId] = { ...state.board.vertices[vertexId], owner: p1, building: 'SETTLEMENT' };
+
+    // Pick an edge that is far from p1's settlement (not adjacent to any of its adjacent edges)
+    const adjacentEdgeIds = boardGraph.vertices[vertexId]!.adjacentEdges;
+    const disconnectedEdge = eIds.find(eId => !adjacentEdgeIds.includes(eId))!;
+
+    applyExpectFail(state, { type: 'PLAY_ROAD_BUILDING', playerId: p1, edgeId1: disconnectedEdge }, rng, 'First road must connect to your network');
+  });
+
+  it('allows a second Road Building road connected only to the first road (CRITICAL-4)', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = initMainTurn([p1, p2, p3], rng);
+    (state as any).players[0].developmentCards = [{ id: 'rb1', type: 'ROAD_BUILDING', boughtThisTurn: false }];
+
+    // Give p1 a single settlement to establish a network
+    const eIds = Object.keys(state.board.edges);
+    const vertexId = Object.keys(boardGraph.vertices).find(vId =>
+      boardGraph.vertices[vId]!.adjacentEdges.some(eId => eIds.includes(eId))
+    )!;
+    (state as any).board.vertices[vertexId] = { ...state.board.vertices[vertexId], owner: p1, building: 'SETTLEMENT' };
+
+    // First road: an edge adjacent to the settlement
+    const firstEdgeId = boardGraph.vertices[vertexId]!.adjacentEdges[0]!;
+    // Second road: an edge adjacent to the first road's other vertex, so it only
+    // connects via the just-placed first road
+    const firstEdge = boardGraph.edges[firstEdgeId]!;
+    const otherVertexId = firstEdge.adjacentVertices.find(v => v !== vertexId)!;
+    const secondEdgeId = boardGraph.vertices[otherVertexId]!.adjacentEdges.find(eId => eId !== firstEdgeId)!;
+
+    const res = CatanEngine.reduce(state, { type: 'PLAY_ROAD_BUILDING', playerId: p1, edgeId1: firstEdgeId, edgeId2: secondEdgeId }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    expect(res.data.nextState.board.edges[firstEdgeId]!.owner).toBe(p1);
+    expect(res.data.nextState.board.edges[secondEdgeId]!.owner).toBe(p1);
+  });
+
 });
 
 describe('CatanEngine - Turn Management Edge Cases', () => {
@@ -616,5 +663,61 @@ describe('CatanEngine - Player Count Validation', () => {
     expect(CatanEngine.getInitialState([playerId('p1'), playerId('p2'), playerId('p3')], rng).players).toHaveLength(3);
     const four = Array.from({ length: 4 }, (_, i) => playerId(`p${i + 1}`));
     expect(CatanEngine.getInitialState(four, rng).players).toHaveLength(4);
+  });
+});
+
+describe('CatanEngine - Per-Player State Projection (CRITICAL-2/3)', () => {
+  const p1 = playerId('p1');
+  const p2 = playerId('p2');
+  const p3 = playerId('p3');
+  const rng = new DeterministicRNG([0.5]);
+
+  it('keeps the full state for the requesting player', () => {
+    const state = initMainTurn([p1, p2, p3], rng);
+    (state as any).players[0].developmentCards = [{ id: 'k1', type: 'KNIGHT', boughtThisTurn: false }];
+    const projected = CatanEngine.getStateForPlayer!(state, p1);
+    expect(projected.players[0]!.developmentCards[0]!.id).toBe('k1');
+  });
+
+  it('hides other players development card details', () => {
+    const state = initMainTurn([p1, p2, p3], rng);
+    (state as any).players[1].developmentCards = [{ id: 'vp1', type: 'VICTORY_POINT', boughtThisTurn: false }];
+    const projected = CatanEngine.getStateForPlayer!(state, p1);
+    const opp = projected.players[1]!;
+    expect(opp.developmentCards).toHaveLength(1);
+    expect(opp.developmentCards[0]!.id).toBe('HIDDEN');
+    expect(opp.developmentCards[0]!.type).not.toBe('VICTORY_POINT');
+    // victory points must not be inflated by hidden card types
+    expect(opp.victoryPoints).toBe(state.players[1]!.victoryPoints);
+  });
+
+  it('does not expose the ordered dev card deck to any player', () => {
+    const state = initMainTurn([p1, p2, p3], rng);
+    const projected = CatanEngine.getStateForPlayer!(state, p1);
+    expect(projected.devCardDeck).toHaveLength(state.devCardDeck.length);
+    expect(projected.devCardDeck).not.toEqual(state.devCardDeck);
+    expect(projected.devCardDeck.every(c => c === 'HIDDEN' as unknown as typeof state.devCardDeck[number])).toBe(true);
+  });
+});
+
+describe('CatanEngine - END_TURN Dev-Card Immutability (LOW-10)', () => {
+  const p1 = playerId('p1');
+  const p2 = playerId('p2');
+  const p3 = playerId('p3');
+  const rng = new DeterministicRNG([0.5]);
+
+  it('does not mutate the card object referenced by the previous state', () => {
+    const state = initMainTurn([p1, p2, p3], rng);
+    (state as any).players[0].developmentCards = [{ id: 'k1', type: 'KNIGHT', boughtThisTurn: true }];
+    (state as any).hasRolled = true;
+
+    const res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: p1 }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+
+    // The previous (frozen) state's card must remain untouched
+    expect(state.players[0]!.developmentCards[0]!.boughtThisTurn).toBe(true);
+    // The new state's cloned card is reset
+    expect(res.data.nextState.players[0]!.developmentCards[0]!.boughtThisTurn).toBe(false);
   });
 });

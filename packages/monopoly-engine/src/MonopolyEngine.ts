@@ -1,7 +1,7 @@
 import type { IGameEngine, IRandomProvider, IStateTransition, Result, PlayerId, PropertyId } from '@packages/engine-core';
 import { shuffleArray, GAME_CONFIGS } from '@packages/engine-core';
 import type { IMonopolyState, MonopolyAction, MonopolyEvent, IMonopolyPlayer } from './types';
-import { BOARD_SPACES } from './board';
+import { BOARD_SPACES, BOARD_SPACES_MAP } from './board';
 import { CHANCE_CARDS, COMMUNITY_CHEST_CARDS } from './cards';
 
 
@@ -101,6 +101,10 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
 
     switch (action.type) {
       case 'ROLL_DICE': {
+        // MED-8: defense-in-depth against rolling twice on the same turn
+        if (currentPlayer.hasRolled) {
+          return { success: false, error: 'ALREADY_ROLLED' };
+        }
         const dice1 = Math.floor(rng.next() * 6) + 1;
         const dice2 = Math.floor(rng.next() * 6) + 1;
 
@@ -447,7 +451,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       }
 
       case 'MORTGAGE_PROPERTY': {
-        const space = BOARD_SPACES.find(s => s.id === action.propertyId);
+        const space = BOARD_SPACES_MAP.get(action.propertyId);
         if (!space || !space.price) {
           return { success: false, error: 'NOT_PURCHASABLE' };
         }
@@ -476,7 +480,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       }
 
       case 'UNMORTGAGE_PROPERTY': {
-        const space = BOARD_SPACES.find(s => s.id === action.propertyId);
+        const space = BOARD_SPACES_MAP.get(action.propertyId);
         if (!space || !space.price) {
           return { success: false, error: 'NOT_PURCHASABLE' };
         }
@@ -500,7 +504,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       }
       
       case 'BUY_HOUSE': {
-        const space = BOARD_SPACES.find(s => s.id === action.propertyId);
+        const space = BOARD_SPACES_MAP.get(action.propertyId);
         if (!space || space.type !== 'PROPERTY' || !space.colorGroup || !space.housePrice) {
           return { success: false, error: 'NOT_PURCHASABLE' };
         }
@@ -553,7 +557,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       }
       
       case 'SELL_HOUSE': {
-        const space = BOARD_SPACES.find(s => s.id === action.propertyId);
+        const space = BOARD_SPACES_MAP.get(action.propertyId);
         if (!space || space.type !== 'PROPERTY' || !space.colorGroup || !space.housePrice) {
           return { success: false, error: 'NOT_PURCHASABLE' };
         }
@@ -589,7 +593,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       case 'PROPOSE_TRADE': {
         const allProps = [...action.offeredProperties, ...action.requestedProperties];
         for (const propId of allProps) {
-          const space = BOARD_SPACES.find(s => s.id === propId);
+          const space = BOARD_SPACES_MAP.get(propId);
           if (space && space.colorGroup) {
             const groupSpaces = BOARD_SPACES.filter(s => s.colorGroup === space.colorGroup);
             const hasBuildings = groupSpaces.some(s => (nextState.buildings[s.id] || 0) > 0);
@@ -637,7 +641,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
               nextState.ownership[propId] = toPlayer.id;
               // Transfer mortgaged properties: new owner pays 10% interest immediately
               if (nextState.mortgagedProperties[propId]) {
-                const space = BOARD_SPACES.find(s => s.id === propId);
+                const space = BOARD_SPACES_MAP.get(propId);
                 if (space && space.price) {
                   const interest = Math.ceil(Math.floor(space.price / 2) * 0.1);
                   toPlayer.money -= interest;
@@ -649,7 +653,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
               nextState.ownership[propId] = fromPlayer.id;
               // Transfer mortgaged properties: new owner pays 10% interest immediately
               if (nextState.mortgagedProperties[propId]) {
-                const space = BOARD_SPACES.find(s => s.id === propId);
+                const space = BOARD_SPACES_MAP.get(propId);
                 if (space && space.price) {
                   const interest = Math.ceil(Math.floor(space.price / 2) * 0.1);
                   fromPlayer.money -= interest;
@@ -723,7 +727,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
               nextState.ownership[propId] = creditor.id;
               
               if (nextState.mortgagedProperties[propId]) {
-                const space = BOARD_SPACES.find(s => s.id === propId);
+                const space = BOARD_SPACES_MAP.get(propId);
                 if (space && space.price) {
                   const mortgageValue = Math.floor(space.price / 2);
                   const interest = Math.ceil(mortgageValue * 0.1);
@@ -810,7 +814,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       return currentPlayer.inJail && !currentPlayer.hasRolled && currentPlayer.getOutOfJailFreeCards.length > 0;
     }
     if (action.type === 'MORTGAGE_PROPERTY') {
-      const space = BOARD_SPACES.find(s => s.id === action.propertyId);
+      const space = BOARD_SPACES_MAP.get(action.propertyId);
       if (!space || currentState.ownership[action.propertyId] !== currentPlayer.id || currentState.mortgagedProperties[action.propertyId]) {
         return false;
       }
@@ -822,12 +826,12 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       return true;
     }
     if (action.type === 'UNMORTGAGE_PROPERTY') {
-      const space = BOARD_SPACES.find(s => s.id === action.propertyId);
+      const space = BOARD_SPACES_MAP.get(action.propertyId);
       const cost = Math.floor((space?.price || 0) / 2 * 1.1);
       return currentState.ownership[action.propertyId] === currentPlayer.id && !!currentState.mortgagedProperties[action.propertyId] && currentPlayer.money >= cost;
     }
     if (action.type === 'BUY_HOUSE' || action.type === 'SELL_HOUSE') {
-      const space = BOARD_SPACES.find(s => s.id === action.propertyId);
+      const space = BOARD_SPACES_MAP.get(action.propertyId);
       if (!space || !space!.colorGroup || currentState.ownership[action.propertyId] !== currentPlayer.id) return false;
       const groupSpaces = BOARD_SPACES.filter(s => s.colorGroup === space!.colorGroup);
       const ownsAll = groupSpaces.every(s => currentState.ownership[s.id] === currentPlayer.id);
@@ -869,7 +873,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
 
       const allProps = [...action.offeredProperties, ...action.requestedProperties];
       for (const propId of allProps) {
-        const space = BOARD_SPACES.find(s => s.id === propId);
+        const space = BOARD_SPACES_MAP.get(propId);
         if (space && space.colorGroup) {
           const groupSpaces = BOARD_SPACES.filter(s => s.colorGroup === space.colorGroup);
           const hasBuildings = groupSpaces.some(s => (currentState.buildings[s.id] || 0) > 0);
@@ -891,5 +895,15 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
     }
 
     return false;
+  },
+
+  getStateForPlayer(currentState: Readonly<IMonopolyState>, _playerId: PlayerId): IMonopolyState {
+    // CRITICAL-2/3: hide hidden information. The ordered chance/chest decks are
+    // hidden (only the count is exposed) so players cannot predict card order.
+    return {
+      ...currentState,
+      chanceDeck: Array.from({ length: currentState.chanceDeck.length }, () => 'HIDDEN'),
+      chestDeck: Array.from({ length: currentState.chestDeck.length }, () => 'HIDDEN')
+    };
   }
 };
