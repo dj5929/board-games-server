@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MonopolyEngine } from '../src/MonopolyEngine';
 import { playerId, propertyId } from '@packages/engine-core';
-import type { IMonopolyState } from '../src/types';
 
 // Deterministic RNG for tests
 const mockRng = {
@@ -138,11 +137,26 @@ describe('Bankruptcy & Debt System', () => {
 
     expect(p1State.status).toBe('BANKRUPT');
     expect(p1State.money).toBe(0);
-    expect(nextState.bankMoney).toBe(20580 + 50); // Original bank + P1's remaining cash
+    expect(nextState.bankMoney).toBe(Infinity); // Infinity bank
 
     // Assets cleared
     expect(nextState.ownership[propertyId('park_place')]).toBeUndefined();
     expect(nextState.chanceDeck).toContain('chance_jail');
+  });
+
+  it('DECLARE_BANKRUPTCY to BANK returns Community Chest jail-free cards to the chest deck', () => {
+    state.players[0].debt = { amount: 1000, to: 'BANK', reason: 'Tax' };
+    state.players[0].money = 50;
+    state.players[0].getOutOfJailFreeCards.push('chest_jail_free');
+
+    const result = MonopolyEngine.reduce(state, { type: 'DECLARE_BANKRUPTCY', playerId: p1 }, mockRng);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const nextState: any = result.data.nextState;
+    expect(nextState.players[0].status).toBe('BANKRUPT');
+    expect(nextState.players[0].getOutOfJailFreeCards).toHaveLength(0);
+    expect(nextState.chestDeck).toContain('chest_jail_free');
   });
 
   it('GAME_OVER is emitted when only 1 active player remains', () => {

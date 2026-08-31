@@ -1,4 +1,5 @@
 import { IGameEngine, IGameState, IPlayerAction, IGameEvent, IRandomProvider, playerId } from '@packages/engine-core';
+import crypto from 'node:crypto';
 
 export interface IClientConnection {
   send(data: string): void;
@@ -7,6 +8,7 @@ export interface IClientConnection {
 export class Room<S extends IGameState, A extends IPlayerAction, E extends IGameEvent> {
   private state: S;
   private connections: Map<string, IClientConnection> = new Map();
+  private sessionTokens: Map<string, string> = new Map();
   public lastActivity: number;
 
   constructor(
@@ -49,8 +51,12 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   }
 
   private broadcastState() {
-    const payload = JSON.stringify({ type: 'STATE_UPDATE', state: this.state });
-    for (const conn of this.connections.values()) {
+    const hasProjection = typeof this.engine.getStateForPlayer === 'function';
+    for (const [pid, conn] of this.connections.entries()) {
+      const stateForPlayer = hasProjection
+        ? this.engine.getStateForPlayer!(this.state, playerId(pid))
+        : this.state;
+      const payload = JSON.stringify({ type: 'STATE_UPDATE', state: stateForPlayer });
       conn.send(payload);
     }
   }
@@ -65,8 +71,18 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   public getAvailablePlayerId(): string | null {
     const allPlayerIds = this.state.players.map(p => p.id);
     for (const id of allPlayerIds) {
-      if (!this.connections.has(id)) return id;
+      if (!this.connections.has(id) && !this.sessionTokens.has(id)) return id;
     }
     return null;
+  }
+
+  public issueSessionToken(playerId: string): string {
+    const token = crypto.randomUUID();
+    this.sessionTokens.set(playerId, token);
+    return token;
+  }
+
+  public verifySessionToken(playerId: string, token: string): boolean {
+    return this.sessionTokens.get(playerId) === token;
   }
 }

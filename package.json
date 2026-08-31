@@ -8,14 +8,17 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:cov": "vitest run --coverage",
+    "lint": "oxlint -c .oxlintrc.json packages/engine-core packages/monopoly-engine packages/catan-engine packages/scotland-yard-engine packages/server",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/ws": "^8.18.1",
-    "@vitest/coverage-v8": "^1.6.1",
+    "@vitest/coverage-v8": "^4.1.11",
+    "oxlint": "^1.80.0",
     "typescript": "^5.3.3",
-    "vitest": "^1.2.2",
-    "zod": "^3.22.4"
+    "vitest": "^4.1.11",
+    "zod": "^4.5.4"
   }
 }

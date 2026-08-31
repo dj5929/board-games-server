@@ -1,16 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import { CatanEngine } from '../src/CatanEngine';
 import { boardGraph } from '../src/board';
-import { IRandomProvider, playerId } from '@packages/engine-core';
+import { playerId, type PlayerId } from '@packages/engine-core';
 import { DeterministicRNG } from '@packages/engine-core/test/helpers';
-import { ICatanAction } from '../src/types';
+import type { ICatanAction, ICatanState } from '../src/types';
+
+function initMainTurn(ids: PlayerId[], rng: { next: () => number }): ICatanState {
+  const state = CatanEngine.getInitialState(ids, rng);
+  return {
+    ...state,
+    turnPhase: 'MAIN_TURN',
+    placementStep: 'SETTLEMENT',
+    placementIndex: 0,
+    pendingRoadVertex: null
+  };
+}
 
 describe('CatanEngine', () => {
   it('should initialize state and graph deterministically', () => {
     const rng = new DeterministicRNG([0.1, 0.5, 0.9]);
-    const state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    const state = CatanEngine.getInitialState([playerId('p1'), playerId('p2'), playerId('p3')], rng);
 
-    expect(state.players).toHaveLength(2);
+    expect(state.players).toHaveLength(3);
     expect(state.board.hexes).toHaveLength(19);
     
     // Graph tests
@@ -20,9 +31,10 @@ describe('CatanEngine', () => {
 
   it('should handle basic building mechanics and resource costs', () => {
     const rng = new DeterministicRNG([0.1]);
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
 
-    // Initial resources from getInitialState are 10 of each
+    // Give resources
+    (state as any).players[0].resources = { WOOD: 10, BRICK: 10, SHEEP: 10, WHEAT: 10, ORE: 10 };
     expect(state.players[0]!.resources.WOOD).toBe(10);
 
     const vertexId = Object.keys(state.board.vertices)[0]!;
@@ -68,7 +80,7 @@ describe('CatanEngine', () => {
 
   it('should generate resources on dice roll', () => {
     const rng = new DeterministicRNG([0.5, 0.5]); // rolls 8 (4+4)
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
 
     // Find a hex that will produce 8
     const hex8 = state.board.hexes.find(h => h.numberToken === 8)!;
@@ -95,7 +107,7 @@ describe('CatanEngine', () => {
 
   it('should reject invalid actions and enforce resource constraints', () => {
     const rng = new DeterministicRNG([0.1]);
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Clear resources to test constraints
     (state as any).players[0].resources = { WOOD: 0, BRICK: 0, SHEEP: 0, WHEAT: 0, ORE: 0 };
@@ -141,7 +153,8 @@ describe('CatanEngine', () => {
     expect(CatanEngine.isValidAction(state, { type: 'ROLL_DICE', playerId: playerId('p2') })).toBe(false);
     expect(CatanEngine.isValidAction(state, { type: 'ROLL_DICE', playerId: playerId('p1') })).toBe(true);
 
-    // END_TURN
+    // END_TURN (requires having rolled first)
+    (state as any).hasRolled = true;
     const res8 = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p1') }, rng);
     expect(res8.success).toBe(true);
     if (res8.success) {

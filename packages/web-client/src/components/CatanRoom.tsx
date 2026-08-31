@@ -16,6 +16,7 @@ const WS_URL = API_URL.replace(/^http/, 'ws');
 interface Props {
   roomId: string;
   localPlayerIds: string[];
+  sessionToken: string;
   onLeave: () => void;
 }
 
@@ -24,7 +25,7 @@ interface Toast {
   msg: string;
 }
 
-export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
+export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
   const [state, setState] = useState<ICatanState | null>(null);
   const [error, setError] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -52,7 +53,7 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
 
   useEffect(() => {
     let isActive = true;
-    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}`);
+    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -147,6 +148,11 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
   const activePlayerId = state?.activePlayerId || '';
   const isMyTurn = localPlayerIds.includes(activePlayerId);
 
+  const isPlacementPhase = state?.turnPhase === 'INITIAL_PLACEMENT_1' || state?.turnPhase === 'INITIAL_PLACEMENT_2';
+  const placementBuildMode = isPlacementPhase
+    ? (state?.placementStep === 'SETTLEMENT' ? 'SETTLEMENT' : 'ROAD')
+    : buildMode;
+
   const handleRollDice = () => {
     wsRef.current?.send(JSON.stringify({ type: 'ROLL_DICE', playerId: activePlayerId }));
   };
@@ -157,6 +163,10 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
 
   const handleVertexClick = (vertexId: string) => {
     if (!isMyTurn) return;
+    if (isPlacementPhase) {
+      wsRef.current?.send(JSON.stringify({ type: 'PLACE_INITIAL_SETTLEMENT', playerId: activePlayerId, vertexId }));
+      return;
+    }
     if (buildMode === 'SETTLEMENT') {
       wsRef.current?.send(JSON.stringify({ type: 'BUILD_SETTLEMENT', playerId: activePlayerId, vertexId }));
     } else if (buildMode === 'CITY') {
@@ -166,6 +176,10 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
 
   const handleEdgeClick = (edgeId: string) => {
     if (!isMyTurn) return;
+    if (isPlacementPhase) {
+      wsRef.current?.send(JSON.stringify({ type: 'PLACE_INITIAL_ROAD', playerId: activePlayerId, edgeId }));
+      return;
+    }
     if (isPlayingRoadBuilding) {
       const newEdges = [...roadBuildingEdges, edgeId];
       if (newEdges.length === 2) {
@@ -207,8 +221,13 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
     if (isPlayingKnight) setIsPlayingKnight(false);
   };
 
+  const discardingPlayerId = state?.turnPhase === 'DISCARD_PHASE'
+    ? (localPlayerIds.find(id => (state?.pendingDiscards[id as PlayerId] || 0) > 0) as PlayerId | undefined)
+    : undefined;
+
   const handleDiscard = (resources: Record<Exclude<ResourceType, 'DESERT'>, number>) => {
-    wsRef.current?.send(JSON.stringify({ type: 'DISCARD_RESOURCES', playerId: localPlayerIds[0], resources }));
+    if (!discardingPlayerId) return;
+    wsRef.current?.send(JSON.stringify({ type: 'DISCARD_RESOURCES', playerId: discardingPlayerId, resources }));
   };
 
   const handleBuyDevCard = () => {
@@ -283,16 +302,17 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
   }
 
   // Check if I need to discard
-  const myPendingDiscards = state.turnPhase === 'DISCARD_PHASE' ? (me ? (state.pendingDiscards[me.id] || 0) : 0) : 0;
+  const discardingPlayer = discardingPlayerId ? state.players.find(p => p.id === discardingPlayerId) : undefined;
+  const myPendingDiscards = discardingPlayerId ? (state.pendingDiscards[discardingPlayerId] || 0) : 0;
 
   return (
     <div className="w-full max-w-7xl mx-auto flex flex-col gap-6 relative p-2 md:p-4">
       {isAnimating && <div className="fixed inset-0 z-[60] bg-transparent pointer-events-auto cursor-wait" />}
       
-      {myPendingDiscards > 0 && me && (
+      {myPendingDiscards > 0 && discardingPlayer && (
         <CatanDiscardModal 
           requiredAmount={myPendingDiscards} 
-          resources={me.resources} 
+          resources={discardingPlayer.resources} 
           onSubmit={handleDiscard} 
         />
       )}
@@ -388,7 +408,7 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
         </div>
       )}
 
-      <CatanBoard state={state} playerId={activePlayerId} buildMode={buildMode} onVertexClick={handleVertexClick} onEdgeClick={handleEdgeClick} onHexClick={handleHexClick}>
+      <CatanBoard state={state} playerId={activePlayerId} buildMode={placementBuildMode} onVertexClick={handleVertexClick} onEdgeClick={handleEdgeClick} onHexClick={handleHexClick}>
         <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 shadow-xl flex flex-col gap-6">
           <div className="text-center">
             <h3 className="text-2xl font-black text-white uppercase tracking-widest mb-2" style={{ color: activePlayer?.color }}>
@@ -396,6 +416,17 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
             </h3>
             <p className="text-gray-400">Phase: <span className="font-bold text-orange-400">{state.turnPhase}</span></p>
           </div>
+
+          {isPlacementPhase && (
+            <div className="bg-orange-900/40 border border-orange-500/40 rounded-xl p-4 text-center">
+              <p className="text-orange-200 font-bold mb-1">Initial Placement</p>
+              <p className="text-gray-300 text-sm">
+                {state.placementStep === 'SETTLEMENT'
+                  ? `${isMyTurn ? 'Click a vertex to place your settlement.' : `Waiting for ${activePlayerId} to place a settlement.`}`
+                  : `${isMyTurn ? 'Click an edge connected to your settlement to place a road.' : `Waiting for ${activePlayerId} to place a road.`}`}
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 bg-gray-900 p-4 rounded-xl border border-gray-800">
              <div className="flex justify-between"><span className="text-gray-400">Wood:</span><span className="font-bold">{me?.resources.WOOD}</span></div>
@@ -424,7 +455,7 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
           )}
 
           <div className="flex flex-col gap-3">
-            {isMyTurn && (
+            {isMyTurn && !isPlacementPhase && (
               <>
                 <div className="text-xs text-gray-400 uppercase tracking-widest mt-2">Build Actions</div>
                 <button 
@@ -461,6 +492,11 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
             )}
 
             <div className="text-xs text-gray-400 uppercase tracking-widest mt-4">Turn Actions</div>
+            {isPlacementPhase && (
+              <p className="text-gray-500 text-sm text-center py-2">
+                No dice rolls during initial placement. Place all settlements and roads first.
+              </p>
+            )}
             {isPlayingRoadBuilding && (
                <div className="flex flex-col gap-2 mb-2">
                  <button 
@@ -476,21 +512,25 @@ export function CatanRoom({ roomId, localPlayerIds, onLeave }: Props) {
                    {roadBuildingEdges.length === 1 ? 'Finish (Build 1 Road)' : 'Cancel Road Building'}
                  </button>
                </div>
+             )}
+            {!isPlacementPhase && (
+              <>
+                <button 
+                  onClick={handleRollDice} 
+                  disabled={!isMyTurn}
+                  className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
+                >
+                  Roll Dice
+                </button>
+                <button 
+                  onClick={handleEndTurn} 
+                  disabled={!isMyTurn}
+                  className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
+                >
+                  End Turn
+                </button>
+              </>
             )}
-            <button 
-              onClick={handleRollDice} 
-              disabled={!isMyTurn}
-              className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
-            >
-              Roll Dice
-            </button>
-            <button 
-              onClick={handleEndTurn} 
-              disabled={!isMyTurn}
-              className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
-            >
-              End Turn
-            </button>
           </div>
         </div>
       </CatanBoard>

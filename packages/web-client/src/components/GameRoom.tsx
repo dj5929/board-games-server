@@ -15,6 +15,7 @@ const WS_URL = API_URL.replace(/^http/, 'ws');
 interface Props {
   roomId: string;
   localPlayerIds: string[];
+  sessionToken: string;
   onLeave: () => void;
 }
 
@@ -23,7 +24,7 @@ interface Toast {
   msg: string;
 }
 
-export function GameRoom({ roomId, localPlayerIds, onLeave }: Props) {
+export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
   const [state, setState] = useState<IMonopolyState | null>(null);
   const [error, setError] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -50,7 +51,7 @@ export function GameRoom({ roomId, localPlayerIds, onLeave }: Props) {
 
   useEffect(() => {
     let isActive = true;
-    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}`);
+    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {

@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
-import type { ScotlandYardState, TransportType } from '@packages/scotland-yard-engine';
+import type { ScotlandYardState, TransportType, PlayerRole } from '@packages/scotland-yard-engine';
 import { deduceTicketForMove } from '@packages/scotland-yard-engine';
 import { ScotlandYardBoard } from './ScotlandYardBoard';
+import { SoundEngine } from '../utils/SoundEngine';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -9,21 +10,23 @@ const WS_URL = API_URL.replace(/^http/, 'ws');
 interface Props {
   roomId: string;
   localPlayerIds: string[];
+  sessionToken: string;
   onLeave: () => void;
 }
 
-export function ScotlandYardRoom({ roomId, localPlayerIds, onLeave }: Props) {
+export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
   const [state, setState] = useState<ScotlandYardState | null>(null);
   const [error, setError] = useState('');
   const [nodeInput, setNodeInput] = useState('');
   const [pendingDoubleMove, setPendingDoubleMove] = useState<{ targetNode: number, ticketType: TransportType } | null>(null);
   const [isDoubleMoveActive, setIsDoubleMoveActive] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<TransportType | 'auto'>('auto');
+  const [gameOver, setGameOver] = useState<{ winner: PlayerRole; reason: string } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     let isActive = true;
-    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}`);
+    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -32,13 +35,19 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, onLeave }: Props) {
         if (isActive) setState(data.state);
       } else if (data.type === 'ACTION_REJECTED') {
         alert('Action Rejected: ' + data.reason);
-      } else if (data.type === 'GAME_EVENT') {
+      } else if (data.type === 'EVENTS') {
         // Handle events like GAME_OVER, PLAYER_MOVED, etc.
-        const ev = data.event;
-        if (ev.type === 'GAME_OVER') {
-           setTimeout(() => {
-             alert(`Game Over! ${ev.payload.winner} wins. ${ev.payload.reason}`);
-           }, 100);
+        for (const ev of data.events) {
+          if (ev.type === 'PLAYER_MOVED') {
+             SoundEngine.playTransitSound(ev.payload.ticketType);
+          } else if (ev.type === 'GAME_OVER') {
+             setGameOver({ winner: ev.payload.winner, reason: ev.payload.reason });
+             if (ev.payload.winner === 'DETECTIVE') {
+                SoundEngine.playSiren();
+             } else {
+                SoundEngine.playVictorySound();
+             }
+          }
         }
       }
     };
@@ -60,10 +69,12 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, onLeave }: Props) {
   };
 
   const handleMoveClick = (node: number, ticketType: TransportType) => {
+     if (!state) return;
      // If we are in the middle of a double move
      if (pendingDoubleMove) {
        dispatch({
          type: 'DOUBLE_MOVE',
+         playerId: state.activePlayerId,
          payload: {
            move1: pendingDoubleMove,
            move2: { targetNode: node, ticketType }
@@ -77,6 +88,7 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, onLeave }: Props) {
      } else {
        dispatch({
          type: 'MOVE',
+         playerId: state.activePlayerId,
          payload: { targetNode: node, ticketType }
        });
      }
@@ -136,7 +148,8 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, onLeave }: Props) {
   const isLocalActive = activePlayer && localPlayerIds.includes(activePlayer.id);
 
   return (
-    <div className="w-full max-w-[95vw] flex-1 min-h-0 flex gap-4">
+    <>
+      <div className="w-full max-w-[95vw] h-[calc(100dvh-1.5rem)] flex gap-4 overflow-hidden">
       {/* Sidebar: Turn info & Tickets */}
       <div className="w-96 min-w-96 shrink-0 bg-gray-800 rounded-2xl p-4 flex flex-col shadow-xl border border-gray-700 overflow-y-auto">
          <h2 className="text-xl font-bold mb-2 border-b border-gray-700 pb-2">Turn {state.currentTurn}</h2>
@@ -232,13 +245,14 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, onLeave }: Props) {
 
             <form onSubmit={handleNodeSubmit} className="flex gap-2">
               <input
-                type="number"
+                type={activePlayer?.role === 'MR_X' ? 'password' : 'number'}
                 value={nodeInput}
                 onChange={(e) => setNodeInput(e.target.value)}
                 className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white"
-                placeholder="Node #"
+                placeholder={activePlayer?.role === 'MR_X' ? 'Hidden (Mr. X)' : 'Node #'}
                 disabled={!isLocalActive}
                 autoComplete="off"
+                inputMode="numeric"
               />
               <button
                 type="submit"
@@ -289,6 +303,27 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, onLeave }: Props) {
             localPlayerIds={localPlayerIds}
          />
       </div>
-    </div>
+      </div>
+
+      {gameOver && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border-2 border-yellow-500 p-8 md:p-12 rounded-3xl shadow-2xl max-w-lg w-full text-center">
+            <h1 className="text-4xl md:text-5xl font-black uppercase tracking-widest mb-4 text-yellow-400">
+              Game Over
+            </h1>
+            <p className="text-2xl font-bold mb-2">
+              {gameOver.winner === 'MR_X' ? 'Mr. X Wins!' : 'Detectives Win!'}
+            </p>
+            <p className="text-gray-400 mb-8">{gameOver.reason}</p>
+            <button
+              onClick={onLeave}
+              className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-bold text-xl w-full"
+            >
+              Return to Lobby
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

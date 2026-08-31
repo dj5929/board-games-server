@@ -1,4 +1,6 @@
 import type { IGameEngine, IRandomProvider, Result, IStateTransition, PlayerId } from '@packages/engine-core';
+import { GAME_CONFIGS } from '@packages/engine-core';
+import { shuffleArray } from '@packages/engine-core';
 import type { ScotlandYardState, ScotlandYardAction, ScotlandYardEvent, TransportType, ScotlandYardPlayer } from './types';
 import { scotlandYardGraph } from './board';
 
@@ -39,11 +41,11 @@ const MR_X_REVEAL_TURNS = [3, 8, 13, 18, 24];
 
 export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardAction, ScotlandYardEvent> = {
   getInitialState(playerIds: PlayerId[], rng: IRandomProvider): ScotlandYardState {
-    if (playerIds.length < 2 || playerIds.length > 6) {
-      throw new Error('Scotland Yard requires 2 to 6 players.');
+    if (playerIds.length < GAME_CONFIGS['scotland-yard'].minPlayers || playerIds.length > GAME_CONFIGS['scotland-yard'].maxPlayers) {
+      throw new Error(`Scotland Yard requires ${GAME_CONFIGS['scotland-yard'].minPlayers} to ${GAME_CONFIGS['scotland-yard'].maxPlayers} players.`);
     }
 
-    const shuffledPositions = [...STARTING_POSITIONS].sort(() => rng.next() - 0.5);
+    const shuffledPositions = shuffleArray(STARTING_POSITIONS, rng);
     const players: ScotlandYardPlayer[] = [];
 
     playerIds.forEach((id, index) => {
@@ -118,7 +120,7 @@ export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardActi
       return { success: false, error: 'Game is over.' };
     }
 
-    if (!this.isValidAction(currentState, action)) {
+    if (!ScotlandYardEngine.isValidAction(currentState, action)) {
       return { success: false, error: 'Invalid action.' };
     }
 
@@ -249,5 +251,23 @@ export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardActi
     }
 
     return { success: true, data: { nextState, events } };
+  },
+
+  getStateForPlayer(currentState: Readonly<ScotlandYardState>, playerId: PlayerId): ScotlandYardState {
+    // Mr. X (and anyone assuming his role) sees his own true position.
+    if (currentState.playerOrder[0] === playerId) return currentState;
+
+    // On reveal turns or once the game is over, everyone may see Mr. X's location.
+    const isRevealTurn = currentState.mrXRevealedTurns.includes(currentState.mrXLog.length);
+    if (isRevealTurn || currentState.status === 'FINISHED') return currentState;
+
+    // Scrub Mr. X's position for all other players. Position 0 does not exist on
+    // the real board, so it renders as "hidden" on the map.
+    return {
+      ...currentState,
+      players: currentState.players.map(p =>
+        p.role === 'MR_X' ? { ...p, position: 0 } : p
+      )
+    };
   }
 };

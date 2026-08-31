@@ -1,7 +1,6 @@
-import { playerId, propertyId } from '@packages/engine-core';
+import { playerId } from '@packages/engine-core';
 import { describe, it, expect } from 'vitest';
 import { MonopolyEngine } from '../src/MonopolyEngine';
-import { IRandomProvider } from '@packages/engine-core';
 
 import { DeterministicRNG } from '@packages/engine-core/test/helpers';
 

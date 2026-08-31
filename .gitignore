@@ -3,3 +3,12 @@ dist/
 coverage/
 *.log
 .env
+*.tsbuildinfo
+packages/*/src/*.js
+packages/*/src/*.js.map
+packages/*/src/*.d.ts
+packages/*/test/*.js
+packages/*/test/*.js.map
+packages/*/__tests__/*.js
+packages/*/__tests__/*.js.map
+

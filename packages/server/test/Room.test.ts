@@ -19,7 +19,7 @@ describe('Room', () => {
     room.addConnection('p1', { send: mockSend });
     
     expect(mockSend).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(mockSend.mock.calls[0][0]);
+    const payload = JSON.parse(mockSend.mock.calls[0]![0]!);
     expect(payload.type).toBe('STATE_UPDATE');
     expect(payload.state.players).toHaveLength(2);
   });
@@ -40,11 +40,11 @@ describe('Room', () => {
     // Expect 2 broadcasts: STATE_UPDATE and EVENTS
     expect(mockSend).toHaveBeenCalledTimes(2);
     
-    const stateUpdate = JSON.parse(mockSend.mock.calls[0][0]);
+    const stateUpdate = JSON.parse(mockSend.mock.calls[0]![0]!);
     expect(stateUpdate.type).toBe('STATE_UPDATE');
     expect(stateUpdate.state.players[0].position).toBe(8); // 4 + 4 based on 0.5 rng -> Math.floor(0.5*6)+1 = 4
     
-    const eventsUpdate = JSON.parse(mockSend.mock.calls[1][0]);
+    const eventsUpdate = JSON.parse(mockSend.mock.calls[1]![0]!);
     expect(eventsUpdate.type).toBe('EVENTS');
     expect(eventsUpdate.events[0].type).toBe('DICE_ROLLED');
   });

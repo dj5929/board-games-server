@@ -1,22 +1,29 @@
 import { useState } from 'react';
+import { GAME_CONFIGS, type GameType } from '@packages/engine-core';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface Props {
-  onJoinRoom: (roomId: string, localPlayerIds: string[], gameType: 'monopoly' | 'catan' | 'scotland-yard') => void;
+  onJoinRoom: (roomId: string, localPlayerIds: string[], gameType: GameType, sessionToken: string) => void;
 }
 
 export function Lobby({ onJoinRoom }: Props) {
-  const [_joinId, _setJoinId] = useState('');
+  const [joinId, setJoinId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'local' | 'online'>('local');
-  const [playerCount, setPlayerCount] = useState<number>(2);
-  const [gameType, setGameType] = useState<'monopoly' | 'catan' | 'scotland-yard'>('monopoly');
+  const [playerCount, setPlayerCount] = useState<number>(GAME_CONFIGS['monopoly'].minPlayers);
+  const [gameType, setGameType] = useState<GameType>('monopoly');
+
+  const selectGameType = (type: GameType) => {
+    setGameType(type);
+    const config = GAME_CONFIGS[type];
+    setPlayerCount((prev) => Math.min(Math.max(prev, config.minPlayers), config.maxPlayers));
+  };
 
   const handleCreate = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/rooms`, { 
+      const res = await fetch(`${API_URL}/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerCount, gameType })
@@ -24,7 +31,7 @@ export function Lobby({ onJoinRoom }: Props) {
       const data = await res.json();
       if (data.roomId) {
         const localPlayerIds = mode === 'local' ? data.playerIds : [data.playerIds[0]];
-        onJoinRoom(data.roomId, localPlayerIds, data.gameType || gameType);
+        onJoinRoom(data.roomId, localPlayerIds, data.gameType || gameType, data.sessionToken);
       }
     } catch (e) {
       console.error(e);
@@ -33,18 +40,17 @@ export function Lobby({ onJoinRoom }: Props) {
     setIsLoading(false);
   };
 
-  // @ts-ignore
-  const _handleJoin = async () => {
-    if (!_joinId) return;
+  const handleJoin = async () => {
+    if (!joinId) return;
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/rooms/${_joinId}/join`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/rooms/${joinId}/join`, { method: 'POST' });
       if (res.status === 404) throw new Error('Room not found');
       if (res.status === 400) throw new Error('Room is full');
-      
+
       const data = await res.json();
       if (data.playerId) {
-        onJoinRoom(_joinId, [data.playerId], data.gameType || 'monopoly');
+        onJoinRoom(joinId, [data.playerId], data.gameType || 'monopoly', data.sessionToken);
       }
     } catch (e: any) {
       console.error(e);
@@ -56,42 +62,43 @@ export function Lobby({ onJoinRoom }: Props) {
   return (
     <div className="w-full max-w-md bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-700 flex flex-col gap-6">
       <h2 className="text-2xl font-bold text-center">Welcome to the Lobby</h2>
-      
+
       <div className="flex flex-col gap-3 p-4 bg-gray-900 rounded-xl border border-gray-700">
         <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Game Mode</label>
         <div className="flex gap-2">
-          {/* Online mode temporarily disabled per user request
-          <button 
+          <button
             onClick={() => setMode('online')}
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${mode === 'online' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Online
           </button>
-          */}
-          <button 
+          <button
             onClick={() => setMode('local')}
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${mode === 'local' ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Hot Seat (Local)
           </button>
         </div>
+        <p className="text-xs text-gray-500">
+          {mode === 'online' ? 'Connect from another machine to play together. You control the first seat.' : 'All players share this screen and take turns.'}
+        </p>
 
         <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider mt-2">Game</label>
         <div className="flex gap-2">
-          <button 
-            onClick={() => setGameType('monopoly')}
+          <button
+            onClick={() => selectGameType('monopoly')}
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'monopoly' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Monopoly
           </button>
-          <button 
-            onClick={() => setGameType('catan')}
+          <button
+            onClick={() => selectGameType('catan')}
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'catan' ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Catan
           </button>
-          <button 
-            onClick={() => setGameType('scotland-yard')}
+          <button
+            onClick={() => selectGameType('scotland-yard')}
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'scotland-yard' ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Scotland Yard
@@ -99,14 +106,17 @@ export function Lobby({ onJoinRoom }: Props) {
         </div>
 
         <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider mt-2">Players</label>
-        <select 
-          value={playerCount} 
+        <select
+          value={playerCount}
           onChange={e => setPlayerCount(Number(e.target.value))}
           className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white outline-none focus:border-blue-500"
         >
-          <option value={2}>2 Players</option>
-          <option value={3}>3 Players</option>
-          <option value={4}>4 Players</option>
+          {Array.from(
+            { length: GAME_CONFIGS[gameType].maxPlayers - GAME_CONFIGS[gameType].minPlayers + 1 },
+            (_, i) => GAME_CONFIGS[gameType].minPlayers + i
+          ).map(count => (
+            <option key={count} value={count}>{count} Players</option>
+          ))}
         </select>
       </div>
 
@@ -118,10 +128,9 @@ export function Lobby({ onJoinRoom }: Props) {
         {isLoading ? 'Creating...' : 'Create New Game'}
       </button>
 
-      {/* Join Room section temporarily disabled per user request
       <div className="relative flex items-center py-2">
         <div className="flex-grow border-t border-gray-600"></div>
-        <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">or</span>
+        <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">or join a room</span>
         <div className="flex-grow border-t border-gray-600"></div>
       </div>
 
@@ -141,7 +150,6 @@ export function Lobby({ onJoinRoom }: Props) {
           Join
         </button>
       </div>
-      */}
     </div>
   );
 }

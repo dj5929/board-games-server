@@ -4,6 +4,6 @@
   "main": "src/index.ts",
   "dependencies": {
     "@packages/engine-core": "*",
-    "zod": "^3.22.4"
+    "zod": "^4.5.4"
   }
 }

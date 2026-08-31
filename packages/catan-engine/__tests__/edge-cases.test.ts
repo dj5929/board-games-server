@@ -1,15 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { CatanEngine } from '../src/CatanEngine';
 import { boardGraph } from '../src/board';
-import { playerId } from '@packages/engine-core';
+import { playerId, type PlayerId } from '@packages/engine-core';
 import { DeterministicRNG } from '@packages/engine-core/test/helpers';
-import { ICatanAction } from '../src/types';
+import type { ICatanAction, ICatanState } from '../src/types';
+
+function initMainTurn(ids: PlayerId[], rng: { next: () => number }): ICatanState {
+  const state = CatanEngine.getInitialState(ids, rng);
+  return {
+    ...state,
+    turnPhase: 'MAIN_TURN',
+    placementStep: 'SETTLEMENT',
+    placementIndex: 0,
+    pendingRoadVertex: null
+  };
+}
 
 describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should allow city to produce 2 resources on dice roll', () => {
     const rng = new DeterministicRNG([0.5, 0.5]); // rolls 8 (4+4)
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
 
     const hex8 = state.board.hexes.find(h => h.numberToken === 8)!;
     const vertexId = Object.keys(boardGraph.vertices).find(vId => boardGraph.vertices[vId]!.adjacentHexes.includes(hex8.id))!;
@@ -31,7 +42,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should block production if Robber is on hex', () => {
     const rng = new DeterministicRNG([0.5, 0.5]); // rolls 8
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
 
     const hex8 = state.board.hexes.find(h => h.numberToken === 8)!;
     const vertexId = Object.keys(boardGraph.vertices).find(vId => boardGraph.vertices[vId]!.adjacentHexes.includes(hex8.id))!;
@@ -60,7 +71,8 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should fail building on occupied edge/vertex and duplicate builds', () => {
     const rng = new DeterministicRNG([0.1]);
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
+    (state as any).players[0].resources = { WOOD: 10, BRICK: 10, SHEEP: 10, WHEAT: 10, ORE: 10 };
     
     const vertexId = Object.keys(state.board.vertices)[0]!;
     const edgeId = boardGraph.vertices[vertexId]!.adjacentEdges[0]!;
@@ -83,7 +95,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should enforce piece limits (5 settlements, 4 cities, 15 roads)', () => {
     const rng = new DeterministicRNG([0.1]);
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Give player infinite resources
     (state as any).players[0].resources = { WOOD: 100, BRICK: 100, SHEEP: 100, WHEAT: 100, ORE: 100 };
@@ -135,7 +147,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should calculate best trade rate from ports', () => {
     const rng = new DeterministicRNG([0.1]);
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Give player resources
     (state as any).players[0].resources = { WOOD: 10, BRICK: 0, SHEEP: 0, WHEAT: 0, ORE: 0 };
@@ -180,7 +192,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should enforce discard on 7 roll for players with > 7 cards', () => {
     const rng = new DeterministicRNG([0.1, 0.5]); 
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Give p1 8 cards, p2 7 cards
     (state as any).players[0].resources = { WOOD: 8, BRICK: 0, SHEEP: 0, WHEAT: 0, ORE: 0 };
@@ -212,7 +224,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should steal a resource when moving robber', () => {
     const rng = new DeterministicRNG([0.34, 0.51, 0.9]); // 7 roll, then 0.9 for stealing random card
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Setup settlements for p2
     const vId = Object.keys(state.board.vertices)[0]!;
@@ -239,7 +251,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should enforce dev card play rules (1 per turn, not on bought turn)', () => {
     const rng = new DeterministicRNG([0.1]); 
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Give player cards directly
     (state as any).players[0].developmentCards = [
@@ -269,7 +281,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should allow VP cards to bypass dev card play limits', () => {
     const rng = new DeterministicRNG([0.1]); 
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Give player VP cards and a normal card
     (state as any).players[0].developmentCards = [
@@ -282,6 +294,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
     // and multiple count.
     
     // Just end turn to trigger checkWinConditionAndAwards
+    (state as any).hasRolled = true;
     let res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p1') }, rng);
     expect(res.success).toBe(true);
     if (!res.success) return;
@@ -295,7 +308,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should award Longest Road (2 VPs) for 5+ roads', () => {
     const rng = new DeterministicRNG([0.1]); 
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     // Find all edges around hex "0,0". There are 6 edges forming a cycle.
     // Taking 5 of them gives a continuous path of length 5.
@@ -307,6 +320,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
       (state as any).board.edges[eId] = { ...state.board.edges[eId], owner: playerId('p1') };
     }
 
+    (state as any).hasRolled = true;
     let res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p1') }, rng);
     expect(res.success).toBe(true);
     if (!res.success) return;
@@ -319,10 +333,11 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
 
   it('should award Largest Army (2 VPs) for 3+ knights', () => {
     const rng = new DeterministicRNG([0.1]); 
-    let state = CatanEngine.getInitialState([playerId('p1'), playerId('p2')], rng);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     
     (state as any).players[0].playedDevelopmentCards = ['KNIGHT', 'KNIGHT', 'KNIGHT'];
 
+    (state as any).hasRolled = true;
     let res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p1') }, rng);
     expect(res.success).toBe(true);
     if (!res.success) return;
@@ -331,6 +346,143 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
     expect(state.largestArmyOwner).toBe(playerId('p1'));
     expect(state.largestArmySize).toBe(3);
     expect(state.players[0]!.victoryPoints).toBe(2);
+  });
+
+  it('should revoke Longest Road when two players tie and the holder is out of the race', () => {
+    const rng = new DeterministicRNG([0.1]);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
+
+    // Two disjoint 5-road chains: p1 and p2 both reach 5 (tie)
+    const chain1 = ['-2,0|-2,1', '-1,0|-2,0', '-1,-1|-1,0', '-1,0|0,-1', '0,-1|0,0'];
+    const chain2 = ['-2,1|-2,2', '-1,1|-2,1', '-1,0|-1,1', '-1,1|0,0', '0,0|0,1'];
+    chain1.forEach(eId => {
+      (state as any).board.edges[eId] = { ...state.board.edges[eId], owner: playerId('p1') };
+    });
+    chain2.forEach(eId => {
+      (state as any).board.edges[eId] = { ...state.board.edges[eId], owner: playerId('p2') };
+    });
+
+    // p3 currently holds Longest Road but is not among the tied candidates
+    (state as any).longestRoadOwner = playerId('p3');
+    (state as any).longestRoadLength = 6;
+    (state as any).hasRolled = true;
+
+    const res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+
+    expect(res.data.nextState.longestRoadOwner).toBeNull();
+    expect(res.data.nextState.longestRoadLength).toBe(4);
+  });
+
+  it('should keep Longest Road and refresh its length when the holder is inside the tie', () => {
+    const rng = new DeterministicRNG([0.1]);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
+
+    const chain1 = ['-2,0|-2,1', '-1,0|-2,0', '-1,-1|-1,0', '-1,0|0,-1', '0,-1|0,0'];
+    const chain2 = ['-2,1|-2,2', '-1,1|-2,1', '-1,0|-1,1', '-1,1|0,0', '0,0|0,1'];
+    chain1.forEach(eId => {
+      (state as any).board.edges[eId] = { ...state.board.edges[eId], owner: playerId('p1') };
+    });
+    chain2.forEach(eId => {
+      (state as any).board.edges[eId] = { ...state.board.edges[eId], owner: playerId('p2') };
+    });
+
+    // p1 already holds Longest Road with a stale length of 4
+    (state as any).longestRoadOwner = playerId('p1');
+    (state as any).longestRoadLength = 4;
+    (state as any).hasRolled = true;
+
+    const res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+
+    expect(res.data.nextState.longestRoadOwner).toBe(playerId('p1'));
+    expect(res.data.nextState.longestRoadLength).toBe(5);
+  });
+
+  it('should build a road connected through an empty vertex adjacent to an own road', () => {
+    const rng = new DeterministicRNG([0.5]); // rolls 8
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
+    (state as any).players[0].resources = { WOOD: 3, BRICK: 3, SHEEP: 1, WHEAT: 1, ORE: 0 };
+
+    // vA holds a settlement; e1 connects vA--vB; e2 connects vB--vC with vB/vC empty.
+    const vA = '-2,0|-2,1|-3,1';
+    const e1 = '-2,0|-2,1';
+    const e2 = '-1,0|-2,0';
+
+    let res = CatanEngine.reduce(state, { type: 'BUILD_SETTLEMENT', playerId: playerId('p1'), vertexId: vA }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+
+    res = CatanEngine.reduce(state, { type: 'BUILD_ROAD', playerId: playerId('p1'), edgeId: e1 }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    state = res.data.nextState;
+
+    // e2 only touches own road e1 through empty vertex vB (no settlement on it)
+    res = CatanEngine.reduce(state, { type: 'BUILD_ROAD', playerId: playerId('p1'), edgeId: e2 }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    expect(res.data.nextState.board.edges[e2]!.owner).toBe(playerId('p1'));
+  });
+
+  it('isValidAction should accept build/trade actions in MAIN_TURN and reject placement actions there', () => {
+    const rng = new DeterministicRNG([0.1]);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
+
+    // build/trade actions are valid during MAIN_TURN
+    expect(CatanEngine.isValidAction(state, { type: 'TRADE_BANK', playerId: playerId('p1'), offerResource: 'WOOD', requestResource: 'BRICK', amount: 1 })).toBe(true);
+    expect(CatanEngine.isValidAction(state, { type: 'PROPOSE_TRADE', playerId: playerId('p1'), toPlayerId: playerId('p2'), offer: { WOOD: 0, BRICK: 0, SHEEP: 0, WHEAT: 0, ORE: 0 }, request: { WOOD: 0, BRICK: 0, SHEEP: 0, WHEAT: 0, ORE: 0 } })).toBe(true);
+
+    // Initial placement actions are only valid during the placement phases
+    expect(CatanEngine.isValidAction(state, { type: 'PLACE_INITIAL_SETTLEMENT', playerId: playerId('p1'), vertexId: '-2,0|-2,1|-3,1' })).toBe(false);
+
+    // BUILD actions fail validation outside MAIN_TURN
+    (state as any).turnPhase = 'ROBBER_PLACEMENT';
+    expect(CatanEngine.isValidAction(state, { type: 'BUILD_SETTLEMENT', playerId: playerId('p1'), vertexId: '-2,0|-2,1|-3,1' })).toBe(false);
+  });
+
+  it('should guard END_TURN against the wrong player and a missing roll', () => {
+    const rng = new DeterministicRNG([0.1]);
+    const state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
+
+    // Wrong player cannot end the turn
+    let res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p2') }, rng);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error).toBe('Not your turn');
+
+    // Must roll before ending the turn
+    res = CatanEngine.reduce(state, { type: 'END_TURN', playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error).toBe('Must roll dice before ending turn');
+  });
+
+  it('should skip the award re-check after the game already finished', () => {
+    const rng = new DeterministicRNG([0.5]);
+    let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
+    (state as any).players[0].resources = { WOOD: 10, BRICK: 10, SHEEP: 10, WHEAT: 10, ORE: 10 };
+
+    // Give p1 five cities = 10 points -> finishing on the roll
+    const vIds = Object.keys(state.board.vertices).slice(0, 5);
+    vIds.forEach(vId => {
+      (state as any).board.vertices[vId] = { ...state.board.vertices[vId], owner: playerId('p1'), building: 'CITY' };
+    });
+
+    let res = CatanEngine.reduce(state, { type: 'ROLL_DICE', playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    expect(res.data.nextState.status).toBe('FINISHED');
+
+    // A further action must not re-award long road / largest army
+    const finished = res.data.nextState;
+    (finished as any).longestRoadOwner = playerId('p2');
+    res = CatanEngine.reduce(finished, { type: 'END_TURN', playerId: playerId('p1') }, rng);
+    expect(res.success).toBe(true);
+    if (!res.success) return;
+    expect(res.data.nextState.longestRoadOwner).toBe(playerId('p2'));
+    expect(res.data.events.filter(e => e.type === 'LONGEST_ROAD_AWARDED')).toHaveLength(0);
   });
 
 });

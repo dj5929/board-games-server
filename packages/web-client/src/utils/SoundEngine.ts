@@ -198,6 +198,85 @@ class SoundEngineImpl {
       time += note.d + 0.05;
     }
   }
+  public playSiren() {
+    if (!this.isEnabled) return;
+    const ctx = this.getContext();
+    const t = ctx.currentTime;
+    
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    osc.type = 'sine';
+    
+    // Siren wail
+    osc.frequency.setValueAtTime(600, t);
+    osc.frequency.linearRampToValueAtTime(800, t + 0.5);
+    osc.frequency.linearRampToValueAtTime(600, t + 1.0);
+    osc.frequency.linearRampToValueAtTime(800, t + 1.5);
+    osc.frequency.linearRampToValueAtTime(600, t + 2.0);
+
+    gainNode.gain.setValueAtTime(0, t);
+    gainNode.gain.linearRampToValueAtTime(0.3, t + 0.1);
+    gainNode.gain.setValueAtTime(0.3, t + 1.9);
+    gainNode.gain.linearRampToValueAtTime(0, t + 2.1);
+
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 2.2);
+  }
+
+  public playTransitSound(type: 'taxi' | 'bus' | 'underground' | 'secret' | 'double') {
+    if (!this.isEnabled) return;
+    const ctx = this.getContext();
+    const t = ctx.currentTime;
+    
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    gainNode.gain.setValueAtTime(0, t);
+
+    if (type === 'taxi') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(400, t);
+        osc.frequency.setValueAtTime(450, t + 0.1); // beep beep
+        gainNode.gain.linearRampToValueAtTime(0.2, t + 0.05);
+        gainNode.gain.linearRampToValueAtTime(0, t + 0.15);
+        osc.start(t);
+        osc.stop(t + 0.2);
+    } else if (type === 'bus') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(150, t);
+        osc.frequency.linearRampToValueAtTime(100, t + 0.4);
+        gainNode.gain.linearRampToValueAtTime(0.2, t + 0.1);
+        gainNode.gain.linearRampToValueAtTime(0, t + 0.5);
+        osc.start(t);
+        osc.stop(t + 0.6);
+    } else if (type === 'underground') {
+        // low rumble
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(80, t);
+        osc.frequency.linearRampToValueAtTime(60, t + 0.6);
+        gainNode.gain.linearRampToValueAtTime(0.3, t + 0.2);
+        gainNode.gain.linearRampToValueAtTime(0, t + 0.8);
+        osc.start(t);
+        osc.stop(t + 0.9);
+    } else {
+        // secret or double
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(800, t);
+        osc.frequency.exponentialRampToValueAtTime(200, t + 0.3);
+        gainNode.gain.linearRampToValueAtTime(0.1, t + 0.05);
+        gainNode.gain.linearRampToValueAtTime(0, t + 0.35);
+        osc.start(t);
+        osc.stop(t + 0.4);
+    }
+    
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+  }
 }
 
 export const SoundEngine = new SoundEngineImpl();
+

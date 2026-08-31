@@ -6,96 +6,137 @@ import { Room } from './Room';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { CatanEngine } from '@packages/catan-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
+import type { IGameEngine, IGameState, IPlayerAction, IGameEvent } from '@packages/engine-core';
+import { GAME_CONFIGS, isGameType } from '@packages/engine-core';
 import { actionSchema } from './schemas';
+import crypto from 'node:crypto';
 
-const fastify = Fastify({ logger: true });
-fastify.register(cors, { origin: '*' });
-fastify.register(fastifyWebsocket);
+const CryptoRandomProvider = {
+  next: () => crypto.randomInt(0, 1000000) / 1000000
+};
 
-// Simple RNG for MVP (in production use seeded or crypto RNG)
-const MathRandomProvider = { next: () => Math.random() };
+export const buildApp = (logger: boolean = true) => {
+  const fastify = Fastify({ logger });
+  roomManager.setLogger({ log: (msg: string) => fastify.log.info(msg) });
 
-fastify.post<{ Body: { playerCount?: number; gameType?: string } }>('/rooms', async (request, reply) => {
-  const body = request.body || {};
-  const playerCount = body.playerCount || 2;
-  const gameType = body.gameType || 'monopoly';
-  const playerIds = Array.from({ length: playerCount }, (_, i) => `p${i + 1}`);
+  fastify.register(cors, { origin: ['http://localhost:5173'] });
+  fastify.register(fastifyWebsocket);
 
-  const roomId = Math.random().toString(36).substring(7);
-  
-  let engine: any = MonopolyEngine;
-  if (gameType === 'catan') {
-    engine = CatanEngine;
-  } else if (gameType === 'scotland-yard') {
-    engine = ScotlandYardEngine;
-  }
+  fastify.post<{ Body: { playerCount?: number; gameType?: string } }>('/rooms', async (request, reply) => {
+    const body = request.body || {};
+    const gameType = body.gameType || 'monopoly';
 
-  const room = new Room(roomId, gameType, engine, MathRandomProvider, playerIds);
-  roomManager.createRoom(room);
-  return { roomId, playerIds, gameType };
-});
+    if (!isGameType(gameType)) {
+      return reply.status(400).send({ error: 'Unknown game type' });
+    }
 
-fastify.post<{ Params: { roomId: string } }>('/rooms/:roomId/join', async (request, reply) => {
-  const roomId = request.params.roomId;
-  const room = roomManager.getRoom(roomId);
-  
-  if (!room) {
-    return reply.status(404).send({ error: 'Room not found' });
-  }
+    const config = GAME_CONFIGS[gameType];
+    const playerCount = body.playerCount ?? config.minPlayers;
 
-  const availableId = room.getAvailablePlayerId();
-  if (!availableId) {
-    return reply.status(400).send({ error: 'Room is full' });
-  }
+    if (typeof playerCount !== 'number' || !Number.isInteger(playerCount) ||
+        playerCount < config.minPlayers || playerCount > config.maxPlayers) {
+      return reply.status(400).send({
+        error: `${GAME_CONFIGS[gameType].label} requires ${config.minPlayers} to ${config.maxPlayers} players.`
+      });
+    }
 
-  return { playerId: availableId, gameType: room.gameType };
-});
+    const playerIds = Array.from({ length: playerCount }, (_, i) => `p${i + 1}`);
 
-fastify.register(async function (fastify) {
-  fastify.get<{ Params: { roomId: string }; Querystring: { playerId?: string } }>('/rooms/:roomId/ws', { websocket: true }, (connection, req) => {
-    const roomId = req.params.roomId;
+    const roomId = crypto.randomUUID();
+
+    const engines: Record<string, IGameEngine<IGameState, IPlayerAction, IGameEvent>> = {
+      'monopoly': MonopolyEngine,
+      'catan': CatanEngine,
+      'scotland-yard': ScotlandYardEngine
+    };
+
+    const engine = engines[gameType];
+    if (!engine) {
+      return reply.status(400).send({ error: 'Unknown game type' });
+    }
+
+    const room = new Room<IGameState, IPlayerAction, IGameEvent>(roomId, gameType, engine, CryptoRandomProvider, playerIds);
+    roomManager.createRoom(room);
+
+    // Auto-join the creator to the first available slot
+    const playerId = playerIds[0]!;
+    const sessionToken = room.issueSessionToken(playerId);
+
+    return { roomId, playerIds, gameType, playerId, sessionToken };
+  });
+
+  fastify.post<{ Params: { roomId: string } }>('/rooms/:roomId/join', async (request, reply) => {
+    const roomId = request.params.roomId;
     const room = roomManager.getRoom(roomId);
-    
+
     if (!room) {
-      connection.socket.close(1008, 'Room not found');
-      return;
+      return reply.status(404).send({ error: 'Room not found' });
     }
 
-    // For MVP, we assume the client passes playerId in query string ?playerId=p1
-    const playerId = req.query.playerId;
-    if (!playerId) {
-      connection.socket.close(1008, 'playerId required in query');
-      return;
+    const availableId = room.getAvailablePlayerId();
+    if (!availableId) {
+      return reply.status(400).send({ error: 'Room is full' });
     }
 
-    room.addConnection(playerId, {
-      send: (data: string) => connection.socket.send(data)
-    });
-    console.log(`[WS] Connection established for room ${roomId} player ${playerId}`);
+    const sessionToken = room.issueSessionToken(availableId);
+    return { playerId: availableId, gameType: room.gameType, sessionToken };
+  });
 
-    connection.socket.on('message', (message: string) => {
-      try {
-        const parsed = JSON.parse(message.toString());
-        const action = actionSchema.parse(parsed);
-        // Dispatch the action to the room
-        room.dispatch(action as Parameters<typeof room.dispatch>[0]);
-      } catch (err) {
-        connection.socket.send(JSON.stringify({ type: 'ERROR', error: 'Invalid payload' }));
+  fastify.register(async function (fastify) {
+    fastify.get<{ Params: { roomId: string }; Querystring: { playerId?: string, token?: string } }>('/rooms/:roomId/ws', { websocket: true }, (socket, req) => {
+      const roomId = req.params.roomId;
+      const room = roomManager.getRoom(roomId);
+
+      if (!room) {
+        socket.close(1008, 'Room not found');
+        return;
       }
-    });
 
-    connection.socket.on('close', (code, reason) => {
-      console.log(`[WS] Connection closed for room ${roomId} player ${playerId}. Code: ${code}, Reason: ${reason}`);
-      room.removeConnection(playerId);
-    });
-    
-    connection.socket.on('error', (err) => {
-      console.log(`[WS] Error for room ${roomId}:`, err);
+      const playerId = req.query.playerId;
+      const token = req.query.token;
+
+      if (!playerId || !token) {
+        socket.close(1008, 'playerId and token required in query');
+        return;
+      }
+
+      if (!room.verifySessionToken(playerId, token)) {
+        socket.close(1008, 'Invalid session token');
+        return;
+      }
+
+      room.addConnection(playerId, {
+        send: (data: string) => socket.send(data)
+      });
+      fastify.log.info(`[WS] Connection established for room ${roomId} player ${playerId}`);
+
+      socket.on('message', (message: string) => {
+        try {
+          const parsed = JSON.parse(message.toString());
+          const action = actionSchema.parse(parsed);
+          // Dispatch the action to the room
+          room.dispatch(action as Parameters<typeof room.dispatch>[0]);
+        } catch {
+          socket.send(JSON.stringify({ type: 'ERROR', error: 'Invalid payload' }));
+        }
+      });
+
+      socket.on('close', (code, reason) => {
+        fastify.log.info(`[WS] Connection closed for room ${roomId} player ${playerId}. Code: ${code}, Reason: ${reason}`);
+        room.removeConnection(playerId);
+      });
+
+      socket.on('error', (err) => {
+        fastify.log.error(`[WS] Error for room ${roomId}: ${err.message}`);
+      });
     });
   });
-});
+
+  return fastify;
+};
 
 export const start = async () => {
+  const fastify = buildApp(false);
   try {
     await fastify.listen({ port: 3000 });
   } catch (err) {
@@ -104,6 +145,6 @@ export const start = async () => {
   }
 };
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && require.main === module) {
   start();
 }

@@ -1,6 +1,7 @@
 
+import { useLayoutEffect, useRef, useState } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import type { ScotlandYardState, TransportType } from '@packages/scotland-yard-engine';
+import type { ScotlandYardState } from '@packages/scotland-yard-engine';
 import { scotlandYardPositions, scotlandYardGraph } from '@packages/scotland-yard-engine';
 
 interface Props {
@@ -8,23 +9,62 @@ interface Props {
   localPlayerIds: string[];
 }
 
+function MrXShadow() {
+  return (
+    <g transform="translate(80, 1120)" style={{ opacity: 0.85 }}>
+      <circle r="10" fill="#000000" stroke="#ffffff" strokeWidth="2" strokeDasharray="4 2" />
+      <text x="18" y="4" fill="#cbd5e1" fontSize="18" fontWeight="bold" pointerEvents="none">
+        Mr. X is on the move...
+      </text>
+    </g>
+  );
+}
+
 export function ScotlandYardBoard({ state, localPlayerIds }: Props) {
   const VIEWPORT_WIDTH = 1600;
   const VIEWPORT_HEIGHT = 1200;
 
-  // Deduce if we are currently looking for a move
-  const activePlayer = state?.players.find(p => p.id === state.activePlayerId);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [fitScale, setFitScale] = useState(0.5);
+  const [ready, setReady] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateFit = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const scale = Math.min(rect.width / VIEWPORT_WIDTH, rect.height / VIEWPORT_HEIGHT);
+        const capped = Math.max(0.1, Math.min(scale, 1.2));
+        setFitScale(capped);
+        setReady(true);
+      }
+    };
+
+    updateFit();
+    const ro = new ResizeObserver(updateFit);
+    ro.observe(el);
+    window.addEventListener('resize', updateFit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateFit);
+    };
+  }, []);
 
   return (
-    <div className="w-full max-w-6xl flex-1 bg-gray-900 rounded-2xl overflow-hidden border border-gray-700 shadow-2xl relative">
+    <div ref={containerRef} className="w-full h-full bg-gray-900 rounded-2xl overflow-hidden border border-gray-700 shadow-2xl relative">
+      {ready && (
       <TransformWrapper
-        initialScale={0.8}
+        initialScale={fitScale}
         initialPositionX={0}
         initialPositionY={0}
-        minScale={0.2}
+        minScale={0.1}
         maxScale={3}
         centerOnInit
         limitToBounds={false}
+        wheel={{ step: 0.005 }}
+        pinch={{ step: 0.005 }}
       >
         {({ zoomIn, zoomOut, resetTransform }) => (
           <>
@@ -37,8 +77,7 @@ export function ScotlandYardBoard({ state, localPlayerIds }: Props) {
             <TransformComponent wrapperClass="w-full h-full cursor-grab active:cursor-grabbing">
               <svg 
                 viewBox={`0 0 ${VIEWPORT_WIDTH} ${VIEWPORT_HEIGHT}`} 
-                className="w-full h-full"
-                style={{ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, backgroundColor: '#0f172a' }} // tailwind slate-900
+                style={{ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, backgroundColor: '#0f172a' }}
               >
                 {/* Edges */}
                 {Object.entries(scotlandYardGraph).map(([sourceId, node]) => {
@@ -107,13 +146,29 @@ export function ScotlandYardBoard({ state, localPlayerIds }: Props) {
 
                 {/* Player Tokens */}
                 {state && state.players.map(player => {
-                   // If Mr X and not visible on this turn, don't show, UNLESS local player is Mr X
-                   const isLocal = localPlayerIds.includes(player.id);
                    const isMrX = player.role === 'MR_X';
                    const isRevealed = state.mrXRevealedTurns.includes(state.mrXLog.length);
-                   const showToken = !isMrX || isRevealed || isLocal || state.status === 'FINISHED';
+                   const isMrXActiveTurn = state.activePlayerId === player.id;
 
-                   if (!showToken) return null;
+                   let showToken = true;
+
+                   if (isMrX) {
+                      const isLocal = localPlayerIds.includes(player.id);
+                      const isHotSeat = localPlayerIds.length > 1;
+
+                      if (isHotSeat) {
+                         // Shared board (e.g. hot-seat): everyone sees one board.
+                         // Hide Mr. X unless it's his active turn, a reveal turn, or the game is over.
+                         showToken = isRevealed || isMrXActiveTurn || state.status === 'FINISHED';
+                      } else if (!isLocal) {
+                         // Non-Mr. X player viewing a private (online) board: never show his location
+                         // except on reveal turns or when the game is over.
+                         showToken = isRevealed || state.status === 'FINISHED';
+                      }
+                      // Lone Mr. X private view: the server already delivers his real position, so show it.
+                   }
+
+                   if (!showToken) return <MrXShadow key={`shadow-${player.id}`} />;
 
                    const pos = scotlandYardPositions[player.position];
                    if (!pos) return null;
@@ -134,11 +189,13 @@ export function ScotlandYardBoard({ state, localPlayerIds }: Props) {
                      </g>
                    )
                 })}
+
               </svg>
             </TransformComponent>
           </>
         )}
       </TransformWrapper>
+      )}
     </div>
   );
 }

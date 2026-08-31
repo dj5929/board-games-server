@@ -25,8 +25,8 @@ export const actionSchema = z.discriminatedUnion('type', [
     requestedProperties: z.array(z.string()).optional(),
     offeredMoney: z.number().optional(),
     requestedMoney: z.number().optional(),
-    offer: z.record(z.number()).optional(),
-    request: z.record(z.number()).optional(),
+    offer: z.record(z.string(), z.number()).optional(),
+    request: z.record(z.string(), z.number()).optional(),
   }),
   // Catan actions
   z.object({ ...baseAction, type: z.literal('BUILD_SETTLEMENT'), vertexId: z.string() }),
@@ -36,7 +36,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.object({ ...baseAction, type: z.literal('PLACE_INITIAL_SETTLEMENT'), vertexId: z.string() }),
   z.object({ ...baseAction, type: z.literal('PLACE_INITIAL_ROAD'), edgeId: z.string() }),
   // Additional Catan actions
-  z.object({ ...baseAction, type: z.literal('DISCARD_RESOURCES'), resources: z.record(z.number()) }),
+  z.object({ ...baseAction, type: z.literal('DISCARD_RESOURCES'), resources: z.record(z.string(), z.number()) }),
   z.object({ ...baseAction, type: z.literal('MOVE_ROBBER'), hexId: z.string(), targetPlayerId: z.string().optional() }),
   z.object({ ...baseAction, type: z.literal('BUY_DEV_CARD') }),
   z.object({ ...baseAction, type: z.literal('PLAY_KNIGHT'), hexId: z.string(), targetPlayerId: z.string().optional() }),
@@ -44,4 +44,10 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.object({ ...baseAction, type: z.literal('PLAY_MONOPOLY'), resource: z.string() }),
   z.object({ ...baseAction, type: z.literal('PLAY_ROAD_BUILDING'), edgeId1: z.string(), edgeId2: z.string().optional() }),
   z.object({ ...baseAction, type: z.literal('TRADE_BANK'), offerResource: z.string(), requestResource: z.string(), amount: z.number() }),
+  // Scotland Yard actions
+  z.object({ ...baseAction, type: z.literal('MOVE'), payload: z.object({ targetNode: z.number(), ticketType: z.string() }) }),
+  z.object({ ...baseAction, type: z.literal('DOUBLE_MOVE'), payload: z.object({
+    move1: z.object({ targetNode: z.number(), ticketType: z.string() }),
+    move2: z.object({ targetNode: z.number(), ticketType: z.string() })
+  }) }),
 ]);

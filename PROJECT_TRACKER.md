@@ -160,22 +160,67 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Ticket Inventory:** Added Detective ticket inventories for the HUD.
 - 🟢 **Ticket Flow:** Ensured tickets seamlessly flow from Detectives to Mr. X upon usage, and added a specific dropdown selector for Mr. X to use Secret/Double tickets.
 
+### 🟢 Phase 24: Win Conditions & Polish (`@packages/scotland-yard-engine`, `@packages/web-client`)
+- 🟢 **Automated Win States:** Check if Mr. X is trapped (Detectives win) or if all Detectives are stuck without valid tickets (Mr. X wins).
+- 🟢 **Thematic Polish:** Added distinct sound effects for `taxi`, `bus`, `underground`, and `secret`/`double` moves, along with a siren effect.
+- 🟢 **Game Over Overlay:** Built a dramatic full-screen game over overlay natively distinguishing between a Detective Win or Mr. X Win.
+
+---
+
+### 🟢 Phase 25: Test Pipeline, CI/CD & Build Reliability
+- 🟢 **Test Pipeline Health:** Deleted stale compiled `.js` test artifacts committed under `packages/*/{test,__tests__}` that crashed Vitest, added compiled-output patterns to `.gitignore`, and fixed the 7 failing engine assertions. `npm test` is fully green — 12 files / 81 tests in ~2s (previously 12/21 files failed and the suite took ~40s).
+- 🟢 **Web-Client Compiles:** Resolved every `tsc -b` error in the client (missing `SoundEngine` import, undeclared `gameOver` state hook, `PlayerId` indexing of `pendingDiscards`, unused `TransportType`/`activePlayer`). Verified with a clean production `vite build`.
+- 🟢 **Server Build & Start:** Added `tsconfig.build.json` (`rootDir: src`, `include: src/**`) so `tsc` emits a flat `dist/server.js`; wired `build` (`tsc -p tsconfig.build.json`) and `start` (`tsx dist/server.js`) scripts. `npm run build` and `npm start` both verified — server boots and listens on port 3000.
+- 🟢 **Root Lint & CI/CD Pipeline:** Installed root `oxlint` with an `.oxlintrc.json` scoped to engines + server; rewrote the GitHub Actions workflow to run on Node 24 via `npm ci` + cache with typecheck, both lint passes, the full test suite, server build, and web-client build — removing all `|| true` masking so regressions fail the build.
+
+### 🟢 Phase 26: Server Hardening & Security (`@packages/server`)
+- 🟢 **Typed Engine Registry:** Replaced the `Record<string, any>` engine loader with `Record<string, IGameEngine<IGameState, IPlayerAction, IGameEvent>>` — no `any` remains in engine selection.
+- 🟢 **Room Auth & Session Tokens:** Room IDs use `crypto.randomUUID()`; each joining player is issued a per-room session token; WebSocket connections require `?playerId=` + `token=` verified against the room; `getAvailablePlayerId` also excludes token-claimed slots. The web client threads `sessionToken` from Lobby → App → all three game rooms so connections are authenticated.
+- 🟢 **RNG & CORS:** Gameplay RNG uses `crypto.randomInt` (unpredictable, anti-cheat); CORS restricted to `http://localhost:5173`.
+- 🟢 **Observability:** All server logging (connection open/close, WebSocket errors, startup failures) is routed through `fastify.log` — no stray `console.*` calls.
+
+### 🟢 Phase 27: Engine Rule Hardening & Anti-Exploit (`@packages/catan-engine`, `@packages/monopoly-engine`, `@packages/scotland-yard-engine`)
+- 🟢 **Catan Turn-Phase Enforcement:** Rewrote `isValidAction` from a stub into full phase-aware validation (blocked when `FINISHED`; `DISCARD_RESOURCES` / `ACCEPT_TRADE` / `REJECT_TRADE` allowed for the relevant non-active player; `MOVE_ROBBER` gated to `ROBBER_PLACEMENT`; dev-card plays blocked when one was already played this turn). Added matching guards to `BUILD_SETTLEMENT` / `BUILD_ROAD` / `UPGRADE_CITY`.
+- 🟢 **Catan `hasRolled` Turn Gate:** Added `hasRolled` to `ICatanState`; players must roll before ending their turn and may not roll twice in one turn (`alreadyRolled` guard).
+- 🟢 **Catan Determinism & Immutability:** Replaced `Math.random()` trade/dev-card IDs with the injected `rng`; fixed `PLAY_ROAD_BUILDING` edge-ownership mutation to shallow-clone; removed dead inline VP increments (VP now always derived from the board by `checkWinConditionAndAwards`).
+- 🟢 **Catan Piece-Limit & Placement Fixes:** Enforced the 15-road limit in `PLAY_ROAD_BUILDING`; allowed building a road connected via an empty vertex adjacent to the player's own road; changed starting resources from 10-of-each (debug) to 0, matching official Catan (initial placement still a documented TODO).
+- 🟢 **Catan Longest-Road Tie/Revoke Semantics:** When two players tie at the max road length and the current holder is not among them, the award is revoked (`owner = null`); when the holder *is* inside the tie, its length is refreshed. `checkWinConditionAndAwards` early-returns once the game is `FINISHED` so awards are never re-awarded post-game.
+- 🟢 **Monopoly Infinite Bank:** Changed `bankMoney: 20580` → `bankMoney: Infinity` (unlimited bank per standard rules).
+- 🟢 **Monopoly Chance-Card Rent Multipliers:** "Advance to nearest Railroad" now doubles the railroad rent; "Advance to nearest Utility" forces a 10x dice-roll rent.
+- 🟢 **Monopoly Trade Safety:** `ACCEPT_TRADE` re-validates sufficient funds at acceptance time (rejects `PROPOSER_INSUFFICIENT_FUNDS` / `INSUFFICIENT_FUNDS`) and charges the 10% mortgage interest to the new owner when a mortgaged property is transferred.
+- 🟢 **Monopoly End-Game Guard & Bankruptcy Cleanup:** `END_TURN` detects when only ≤1 active player remains and finishes the game (prevents the infinite bankrupt-player loop); `DECLARE_BANKRUPTCY` returns any Community Chest get-out-of-jail cards to the chest deck.
+- 🟢 **Scotland Yard Determinism:** Replaced the biased `.sort(() => rng.next() - 0.5)` start-position shuffle with `shuffleArray`; made `reduce` call `ScotlandYardEngine.isValidAction` statically (removes fragile `this` binding).
+- 🟢 **Testing:** Expanded `edge-cases.test.ts` (longest-road tie/revoke, empty-vertex road connectivity, phase-aware `isValidAction`, END_TURN guards, post-game award skip), `debt.test.ts` (bankruptcy card return, Infinity bank), and Catan `catan.test.ts`. Full suite green (242 tests); typecheck and lint clean.
+
+### 🟢 Phase 28: Shared-Board Hidden Movement & Per-Player Projection (`@packages/scotland-yard-engine`, `@packages/server`, `@packages/web-client`, `@packages/engine-core`)
+- 🟢 **Same-Board Visibility:** Fixed the shared hot-seat board so everyone (including Mr. X) can play together. Previously `ScotlandYardBoard.tsx` used `isLocal` (true for *all* local players in hot-seat), which leaked Mr. X's exact location to every detective and broke hidden movement. Mr. X's token is now hidden on the shared board except on reveal turns, during Mr. X's own active turn, or after game over — with a `MrXShadow` ("Mr. X is on the move...") indicator shown when hidden.
+- 🟢 **Per-Player State Projection:** Added optional `getStateForPlayer?(state, playerId)` to the core `IGameEngine` interface for hidden-information engines. `ScotlandYardEngine` implements it to scrub Mr. X's `position` (set to sentinel `0`) for non-Mr-X viewers except on reveal turns / game-over; Mr. X always receives his true position.
+- 🟢 **Server-Side Scrubbing:** `Room.broadcastState` now sends a projected `STATE_UPDATE` per connection (when the engine exposes `getStateForPlayer`) instead of one shared payload, so Mr. X's real location is never leaked over the WebSocket to opposing players.
+- 🟢 **Testing:** Added 4 projection tests (Mr. X full state, detective scrubbing, reveal-turn preservation, game-over preservation) to `game-flow.test.ts`. Full suite green (242 tests), typecheck and lint clean.
+- 🟢 **Agent Context Refactor:** Renamed `GEMINI.md` → `AGENTS.md` (and `packages/web-client/GEMINI.md` → `AGENTS.md`) so any LLM agent tooling can discover the rules/skills via a standard filename.
+
+### 🟢 Phase 29: Per-Game Player Count Rules & Scotland Yard Board Polish (`@packages/engine-core`, `@packages/server`, `@packages/web-client`, all engines)
+- 🟢 **Shared Game Config:** Added `engine-core/src/gameConfig.ts` exporting `GAME_CONFIGS` (with `minPlayers`/`maxPlayers`) and the `GameType` union + `isGameType` guard. Ranges verified against official rules: **Monopoly 2–8**, **Catan 3–4**, **Scotland Yard 3–6**.
+- 🟢 **Dynamic Lobby Player Selector:** `Lobby.tsx` now renders the Players dropdown from the selected game's range (previously a hardcoded 2/3/4 for every game) and re-clamps the current selection into range when switching games. Scotland Yard can now request 5–6 players (was capped at 4 by the old dropdown).
+- 🟢 **Server-Side Validation:** `POST /rooms` validates `playerCount` against the per-game range, returns a clean `400` with a descriptive message for out-of-range values (previously accepted any count; Scotland Yard threw an uncaught 500), and defaults to `minPlayers` when omitted.
+- 🟢 **Engine-Level Validation (defense in depth):** `MonopolyEngine` / `CatanEngine` / `ScotlandYardEngine` each throw on invalid counts in `getInitialState` — Monopoly "2 to 8", Catan "3 to 4", Scotland Yard updated from 2–6 to 3–6.
+- 🟢 **Scotland Yard Map Fit-to-Screen:** `ScotlandYardBoard.tsx` now measures its container (`ResizeObserver`) and computes an `initialScale = min(w/1600, h/1200)` so the entire map is visible without scrolling and fills the viewport; renders the zoom wrapper only after measurement to avoid a mount-time scale race. The container/SVG sizing and the room's height chain were fixed so the board no longer collapses into a small rectangle.
+- 🟢 **Gentler Zoom:** Wheel/pinch zoom step reduced from `0.05` to `0.005` so a single scroll tick produces a subtle zoom instead of a large jump; `minScale` lowered to `0.1` and `limitToBounds` disabled for free panning.
+- 🟢 **Ms. X Node Input Obscured:** In `ScotlandYardRoom.tsx` the destination-node input switches to `type="password"` (placeholder "Hidden (Mr. X)") during Mr. X's active turn so nearby detectives cannot read the node number he is entering.
+- 🟢 **Migration of Catan tests to 3+ players** and new validation tests (Monopoly 2/8 accept + reject boundaries, Catan 3/4 accept + reject boundaries, Scotland Yard 3–6) plus a server `400` rejection test and Lobby dropdown-range tests. Full suite green (250 tests), typecheck and lint clean.
+
 ---
 
 ## 🟡 Active & Remaining Roadmap
 
-### 🟡 Scotland Yard Implementation (Phases 24)
-- 🔴 **Phase 24: Win Conditions & Polish:** Automate win states (Mr. X caught vs. Mr. X survives/Detectives stuck), and add thematic audio/visual polish (sirens, transit animations).
-
-### 🟡 Infrastructure & Deployment (Phase 25)
+### 🟡 Infrastructure & Deployment (Phase 30)
 - 🔴 **Containerization:** Containerize Fastify server and Vite client with Dockerfile and `docker-compose.yml`.
 - 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances.
-- 🔴 **CI/CD Pipeline:** GitHub Actions workflow for automated testing (`npm test`) and lint checks.
+- 🔴 **Online Multiplayer Mode:** Re-enable the online room-join flow end-to-end across machines (client-side session-token plumbing is already done in Phase 26; the Lobby create/join flow still needs re-enabling).
 
 ---
 
 ## 🔮 Future Additions (Post-MVP)
-- 🔴 **Online Multiplayer Mode:** Re-enable online mode allowing players to join via Room IDs across multiple machines (UI temporarily disabled in Phase 12).
 - 🔴 **Turn Timer / AFK Management:** Add a visual countdown timer to enforce active play and auto-kick/bankrupt AFK players.
 - 🔴 **Auctions:** Automatically trigger an auction bidding phase when a player lands on an unowned property and declines to buy it.
 

@@ -69,6 +69,12 @@ export interface ICatanState extends IGameState {
   readonly largestArmySize: number;
   readonly winner: PlayerId | null;
   readonly playedDevCardThisTurn: boolean;
+  readonly hasRolled: boolean;
+  // Initial placement progress tracking
+  readonly placementOrder: readonly PlayerId[];
+  readonly placementIndex: number;
+  readonly placementStep: 'SETTLEMENT' | 'ROAD';
+  readonly pendingRoadVertex: string | null;
 }
 
 export type ICatanAction = IPlayerAction & (

@@ -1,7 +1,6 @@
 import { playerId, propertyId } from '@packages/engine-core';
 import { describe, it, expect } from 'vitest';
 import { MonopolyEngine } from '../src/MonopolyEngine';
-import { IRandomProvider } from '@packages/engine-core';
 import { DeterministicRNG } from '@packages/engine-core/test/helpers';
 import { BOARD_SPACES } from '../src/board';
 
@@ -323,7 +322,6 @@ describe('MonopolyEngine Phase 5/8: Missing Game Logic Fixes', () => {
     
     // p1 rolls and lands on reading (pos 5)
     // Needs a roll of 6 to get from 39 to 5
-    const customRng = new DeterministicRNG([3/6, 2/6]); // yields 4 and 3 -> 7, pos 6 (Oriental). Let's use 2 and 4
     const rrRng = new DeterministicRNG([1/6, 3/6]); // yields 2 and 4 = 6. 39 + 6 = 45 -> 45 % 40 = 5 (Reading)
     
     const { nextState } = reduceHelper(state, { type: 'ROLL_DICE', playerId: playerId('p1') }, rrRng);

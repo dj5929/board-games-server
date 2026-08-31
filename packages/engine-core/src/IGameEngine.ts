@@ -14,4 +14,10 @@ export interface IGameEngine<
 
   // Validates if an action is legal in the current state
   isValidAction(currentState: Readonly<TState>, action: Readonly<TAction>): boolean;
+
+  // Optional per-player projection of the authoritative state. Engines that
+  // have hidden information (e.g. Scotland Yard's Mr. X location) implement
+  // this so the server can broadcast a scrubbed view to each connection.
+  // Returning the state unchanged is equivalent to not implementing it.
+  getStateForPlayer?(currentState: Readonly<TState>, playerId: PlayerId): TState;
 }

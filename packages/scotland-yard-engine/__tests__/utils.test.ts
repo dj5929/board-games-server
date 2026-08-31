@@ -1,16 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import { playerId } from '@packages/engine-core';
 import { deduceTicketForMove } from '../src/utils';
 import type { ScotlandYardState, ScotlandYardPlayer } from '../src/types';
 
 describe('deduceTicketForMove', () => {
   const mockState: ScotlandYardState = {
     players: [
-      { id: 'mrx', role: 'MR_X', position: 13, tickets: { taxi: 4, bus: 3, underground: 3, secret: 2, double: 1 } },
-      { id: 'det1', role: 'DETECTIVE', position: 14, tickets: { taxi: 10, bus: 8, underground: 4, secret: 0, double: 0 } },
-      { id: 'det2', role: 'DETECTIVE', position: 29, tickets: { taxi: 10, bus: 8, underground: 4, secret: 0, double: 0 } }
+      { id: playerId('mrx'), role: 'MR_X', position: 13, tickets: { taxi: 4, bus: 3, underground: 3, secret: 2, double: 1 } },
+      { id: playerId('det1'), role: 'DETECTIVE', position: 14, tickets: { taxi: 10, bus: 8, underground: 4, secret: 0, double: 0 } },
+      { id: playerId('det2'), role: 'DETECTIVE', position: 29, tickets: { taxi: 10, bus: 8, underground: 4, secret: 0, double: 0 } }
     ],
-    playerOrder: ['mrx', 'det1', 'det2'],
-    activePlayerId: 'mrx',
+    playerOrder: [playerId('mrx'), playerId('det1'), playerId('det2')],
+    activePlayerId: playerId('mrx'),
     currentTurn: 1,
     mrXLog: [],
     mrXRevealedTurns: [3],

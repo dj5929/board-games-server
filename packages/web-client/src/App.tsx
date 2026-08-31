@@ -10,6 +10,7 @@ interface GameConfig {
   roomId: string;
   localPlayerIds: string[];
   gameType: 'monopoly' | 'catan' | 'scotland-yard';
+  sessionToken: string;
 }
 
 function App() {
@@ -20,13 +21,13 @@ function App() {
       <AudioToggle />
       <main className="flex-1 flex flex-col items-center justify-center p-6">
         {!gameConfig ? (
-          <Lobby onJoinRoom={(roomId, localPlayerIds, gameType) => setGameConfig({ roomId, localPlayerIds, gameType })} />
+          <Lobby onJoinRoom={(roomId, localPlayerIds, gameType, sessionToken) => setGameConfig({ roomId, localPlayerIds, gameType, sessionToken })} />
         ) : (
           gameConfig.gameType === 'monopoly' ? 
-            <GameRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} onLeave={() => setGameConfig(null)} /> :
+            <GameRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} sessionToken={gameConfig.sessionToken} onLeave={() => setGameConfig(null)} /> :
           gameConfig.gameType === 'catan' ?
-            <CatanRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} onLeave={() => setGameConfig(null)} /> :
-            <ScotlandYardRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} onLeave={() => setGameConfig(null)} />
+            <CatanRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} sessionToken={gameConfig.sessionToken} onLeave={() => setGameConfig(null)} /> :
+            <ScotlandYardRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} sessionToken={gameConfig.sessionToken} onLeave={() => setGameConfig(null)} />
         )}
       </main>
     </div>

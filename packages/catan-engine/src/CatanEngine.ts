@@ -1,4 +1,4 @@
-import { playerId, type IGameEngine, type IRandomProvider, type Result, type IStateTransition, type PlayerId } from '@packages/engine-core';
+import { playerId, GAME_CONFIGS, type IGameEngine, type IRandomProvider, type Result, type IStateTransition, type PlayerId } from '@packages/engine-core';
 import type { ICatanState, ICatanAction, ICatanEvent, CatanPlayer, ResourceType, Hex, Vertex, Edge, DevCardType } from './types';
 import { generateBoard, boardGraph } from './board';
 
@@ -137,11 +137,15 @@ function checkWinConditionAndAwards(nextState: MutableCatanState, events: ICatan
 
 export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = {
   getInitialState(playerIds: PlayerId[], rng: IRandomProvider): ICatanState {
+    if (playerIds.length < GAME_CONFIGS['catan'].minPlayers || playerIds.length > GAME_CONFIGS['catan'].maxPlayers) {
+      throw new Error(`Catan requires ${GAME_CONFIGS['catan'].minPlayers} to ${GAME_CONFIGS['catan'].maxPlayers} players.`);
+    }
+
     const colors = ['#e11d48', '#2563eb', '#16a34a', '#d97706'];
     const players: CatanPlayer[] = playerIds.map((id, index) => ({
       id,
       color: colors[index % colors.length]!,
-      resources: { WOOD: 10, BRICK: 10, SHEEP: 10, WHEAT: 10, ORE: 10 },
+      resources: { WOOD: 0, BRICK: 0, SHEEP: 0, WHEAT: 0, ORE: 0 },
       victoryPoints: 0,
       developmentCards: [],
       playedDevelopmentCards: []
@@ -162,21 +166,28 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
       [devCardDeck[i], devCardDeck[j]] = [devCardDeck[j]!, devCardDeck[i]!];
     }
 
+    const placementOrder = players.map(p => p.id);
+
     return {
       status: 'IN_PROGRESS',
       players,
       board: generateBoard(rng),
-      turnPhase: 'MAIN_TURN', // Start in main turn for simplicity right now
+      turnPhase: 'INITIAL_PLACEMENT_1',
+      hasRolled: false,
       pendingDiscards: {},
       devCardDeck,
-      activePlayerId: players[0]!.id,
+      activePlayerId: placementOrder[0]!,
       activeTrade: null,
       longestRoadOwner: null,
       longestRoadLength: 4,
       largestArmyOwner: null,
       largestArmySize: 2,
       winner: null,
-      playedDevCardThisTurn: false
+      playedDevCardThisTurn: false,
+      placementOrder,
+      placementIndex: 0,
+      placementStep: 'SETTLEMENT',
+      pendingRoadVertex: null
     };
   },
 
@@ -217,6 +228,8 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
       case 'ROLL_DICE': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
         if (currentState.turnPhase !== 'MAIN_TURN') return { success: false, error: 'Cannot roll now' };
+        if (currentState.hasRolled) return { success: false, error: 'Already rolled this turn' };
+        nextState.hasRolled = true;
         
         const dice1 = Math.floor(rng.next() * 6) + 1;
         const dice2 = Math.floor(rng.next() * 6) + 1;
@@ -280,7 +293,86 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
-      
+
+      case 'PLACE_INITIAL_SETTLEMENT': {
+        if (currentState.turnPhase !== 'INITIAL_PLACEMENT_1' && currentState.turnPhase !== 'INITIAL_PLACEMENT_2') {
+          return { success: false, error: 'Not in initial placement' };
+        }
+        if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.placementStep !== 'SETTLEMENT') return { success: false, error: 'Must place a road first' };
+
+        const vertexId = action.vertexId;
+        const vertex = nextBoard.vertices[vertexId];
+        if (!vertex) return { success: false, error: 'Invalid vertex' };
+        if (vertex.building) return { success: false, error: 'Vertex is already occupied' };
+
+        const adjacentVertices = boardGraph.vertices[vertexId]!.adjacentVertices;
+        for (const adj of adjacentVertices) {
+          if (nextBoard.vertices[adj]?.building) {
+            return { success: false, error: 'Distance rule violated' };
+          }
+        }
+
+        nextBoard.vertices[vertexId] = { ...vertex, owner: action.playerId, building: 'SETTLEMENT' };
+        nextState.placementStep = 'ROAD';
+        nextState.pendingRoadVertex = vertexId;
+
+        events.push({ type: 'SETTLEMENT_BUILT', playerId: action.playerId, vertexId });
+        checkWinConditionAndAwards(nextState, events);
+        return { success: true, data: { nextState, events } };
+      }
+
+      case 'PLACE_INITIAL_ROAD': {
+        if (currentState.turnPhase !== 'INITIAL_PLACEMENT_1' && currentState.turnPhase !== 'INITIAL_PLACEMENT_2') {
+          return { success: false, error: 'Not in initial placement' };
+        }
+        if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.placementStep !== 'ROAD') return { success: false, error: 'Must place a settlement first' };
+
+        const edgeId = action.edgeId;
+        const edge = nextBoard.edges[edgeId];
+        if (!edge) return { success: false, error: 'Invalid edge' };
+        if (edge.owner) return { success: false, error: 'Edge already occupied' };
+
+        const pendingVertexId = currentState.pendingRoadVertex;
+        if (!pendingVertexId) return { success: false, error: 'No settlement to attach road to' };
+        if (!boardGraph.vertices[pendingVertexId]!.adjacentEdges.includes(edgeId)) {
+          return { success: false, error: 'Road must connect to your settlement' };
+        }
+
+        nextBoard.edges[edgeId] = { ...edge, owner: action.playerId };
+
+        const order = [...currentState.placementOrder];
+        const nextIndex = currentState.placementIndex + 1;
+        let nextOrder = order;
+        let nextPlacementIndex = nextIndex;
+        let nextPlayerId: PlayerId;
+        let pendingRoadVertex: string | null = null;
+
+        if (nextIndex < order.length) {
+          nextPlayerId = order[nextIndex]!;
+        } else if (currentState.turnPhase === 'INITIAL_PLACEMENT_1') {
+          nextOrder = [...order].reverse();
+          nextPlacementIndex = 0;
+          nextPlayerId = nextOrder[0]!;
+          nextState.turnPhase = 'INITIAL_PLACEMENT_2';
+        } else {
+          nextPlacementIndex = 0;
+          nextPlayerId = order[0]!;
+          nextState.turnPhase = 'MAIN_TURN';
+        }
+
+        nextState.placementOrder = nextOrder;
+        nextState.placementIndex = nextPlacementIndex;
+        nextState.placementStep = 'SETTLEMENT';
+        nextState.pendingRoadVertex = pendingRoadVertex;
+        nextState.activePlayerId = nextPlayerId;
+
+        events.push({ type: 'ROAD_BUILT', playerId: action.playerId, edgeId });
+        checkWinConditionAndAwards(nextState, events);
+        return { success: true, data: { nextState, events } };
+      }
+
       case 'DISCARD_RESOURCES': {
         if (currentState.turnPhase !== 'DISCARD_PHASE') return { success: false, error: 'Not in discard phase' };
         
@@ -366,6 +458,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
       
       case 'BUILD_SETTLEMENT': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.turnPhase !== 'MAIN_TURN') return { success: false, error: 'Cannot build now' };
         
         if (activePlayer.resources.WOOD < 1 || activePlayer.resources.BRICK < 1 || 
             activePlayer.resources.SHEEP < 1 || activePlayer.resources.WHEAT < 1) {
@@ -403,7 +496,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources.WHEAT -= 1;
         
         nextBoard.vertices[vertexId] = { ...vertex, owner: action.playerId, building: 'SETTLEMENT' };
-        activePlayer.victoryPoints += 1;
 
         events.push({ type: 'SETTLEMENT_BUILT', playerId: action.playerId, vertexId });
         checkWinConditionAndAwards(nextState, events);
@@ -412,6 +504,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
 
       case 'BUILD_ROAD': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.turnPhase !== 'MAIN_TURN') return { success: false, error: 'Cannot build now' };
         
         if (activePlayer.resources.WOOD < 1 || activePlayer.resources.BRICK < 1) {
           return { success: false, error: 'Not enough resources' };
@@ -462,6 +555,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
 
       case 'UPGRADE_CITY': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (currentState.turnPhase !== 'MAIN_TURN') return { success: false, error: 'Cannot build now' };
         
         if (activePlayer.resources.ORE < 3 || activePlayer.resources.WHEAT < 2) {
           return { success: false, error: 'Not enough resources' };
@@ -483,7 +577,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources.WHEAT -= 2;
         
         nextBoard.vertices[vertexId] = { ...vertex, building: 'CITY' };
-        activePlayer.victoryPoints += 1;
 
         events.push({ type: 'CITY_UPGRADED', playerId: action.playerId, vertexId });
         checkWinConditionAndAwards(nextState, events);
@@ -543,7 +636,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         }
         
         nextState.activeTrade = {
-          id: Math.random().toString(36).substring(7),
+          id: rng.next().toString(36).substring(2, 9),
           fromPlayerId: action.playerId,
           toPlayerId: action.toPlayerId,
           offer: { ...action.offer },
@@ -616,7 +709,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
 
         const cardType = nextState.devCardDeck.pop()!;
         activePlayer.developmentCards.push({
-          id: Math.random().toString(36).substring(7),
+          id: rng.next().toString(36).substring(2, 9),
           type: cardType,
           boughtThisTurn: true
         });
@@ -742,6 +835,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         // wait, we should just assign the edges if valid. 
         // Re-using logic from BUILD_ROAD could be complex without resources.
         // Let's implement simple check.
+        const playerRoads = Object.values(nextBoard.edges).filter(e => e.owner === action.playerId).length;
         const edges = [action.edgeId1];
         if (action.edgeId2) edges.push(action.edgeId2);
         
@@ -754,12 +848,17 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           // We can just add them for MVP, but to be safe:
         }
         
+        // Enforce 15-road limit
+        if (playerRoads + edges.length > 15) {
+          return { success: false, error: 'Maximum roads reached' };
+        }
+        
         activePlayer.developmentCards.splice(cardIndex, 1);
         activePlayer.playedDevelopmentCards.push('ROAD_BUILDING');
         nextState.playedDevCardThisTurn = true;
         
         for (const edgeId of edges) {
-          nextBoard.edges[edgeId]!.owner = action.playerId;
+          nextBoard.edges[edgeId] = { ...nextBoard.edges[edgeId]!, owner: action.playerId };
           events.push({ type: 'ROAD_BUILT', playerId: action.playerId, edgeId });
         }
         
@@ -781,6 +880,8 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
 
       case 'END_TURN': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        if (!currentState.hasRolled) return { success: false, error: 'Must roll dice before ending turn' };
+        nextState.hasRolled = false;
         const nextIndex = (activePlayerIndex + 1) % currentState.players.length;
         const nextPlayerId = currentState.players[nextIndex]!.id;
         
@@ -807,7 +908,50 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
   },
 
   isValidAction(currentState: Readonly<ICatanState>, action: Readonly<ICatanAction>): boolean {
+    if (currentState.status === 'FINISHED') return false;
+    
+    // DISCARD_RESOURCES can be sent by any player who needs to discard
+    if (action.type === 'DISCARD_RESOURCES') {
+      return !!currentState.pendingDiscards[action.playerId];
+    }
+    
+    // ACCEPT_TRADE / REJECT_TRADE can be sent by the trade recipient
+    if (action.type === 'ACCEPT_TRADE' || action.type === 'REJECT_TRADE') {
+      return !!currentState.activeTrade && currentState.activeTrade.toPlayerId === action.playerId;
+    }
+    
+    // All other actions require being the active player
     if (action.playerId !== currentState.activePlayerId) return false;
-    return true;
+    
+    switch (action.type) {
+      case 'ROLL_DICE':
+        return currentState.turnPhase === 'MAIN_TURN' && !currentState.hasRolled;
+      case 'MOVE_ROBBER':
+        return currentState.turnPhase === 'ROBBER_PLACEMENT';
+      case 'PLACE_INITIAL_SETTLEMENT':
+        return (currentState.turnPhase === 'INITIAL_PLACEMENT_1' || currentState.turnPhase === 'INITIAL_PLACEMENT_2')
+          && currentState.placementStep === 'SETTLEMENT';
+      case 'PLACE_INITIAL_ROAD':
+        return (currentState.turnPhase === 'INITIAL_PLACEMENT_1' || currentState.turnPhase === 'INITIAL_PLACEMENT_2')
+          && currentState.placementStep === 'ROAD'
+          && !!currentState.pendingRoadVertex;
+      case 'BUILD_SETTLEMENT':
+      case 'BUILD_ROAD':
+      case 'UPGRADE_CITY':
+      case 'TRADE_BANK':
+      case 'BUY_DEV_CARD':
+      case 'PROPOSE_TRADE':
+      case 'CANCEL_TRADE':
+        return currentState.turnPhase === 'MAIN_TURN';
+      case 'PLAY_KNIGHT':
+      case 'PLAY_YEAR_OF_PLENTY':
+      case 'PLAY_MONOPOLY':
+      case 'PLAY_ROAD_BUILDING':
+        return currentState.turnPhase === 'MAIN_TURN' && !currentState.playedDevCardThisTurn;
+      case 'END_TURN':
+        return currentState.turnPhase === 'MAIN_TURN' && currentState.hasRolled;
+      default:
+        return false;
+    }
   }
 };

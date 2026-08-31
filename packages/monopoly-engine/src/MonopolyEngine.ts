@@ -1,5 +1,5 @@
 import type { IGameEngine, IRandomProvider, IStateTransition, Result, PlayerId, PropertyId } from '@packages/engine-core';
-import { shuffleArray } from '@packages/engine-core';
+import { shuffleArray, GAME_CONFIGS } from '@packages/engine-core';
 import type { IMonopolyState, MonopolyAction, MonopolyEvent, IMonopolyPlayer } from './types';
 import { BOARD_SPACES } from './board';
 import { CHANCE_CARDS, COMMUNITY_CHEST_CARDS } from './cards';
@@ -20,6 +20,10 @@ type MutableMonopolyState = {
 
 export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, MonopolyEvent> = {
   getInitialState(playerIds: PlayerId[], rng: IRandomProvider): IMonopolyState {
+    if (playerIds.length < GAME_CONFIGS['monopoly'].minPlayers || playerIds.length > GAME_CONFIGS['monopoly'].maxPlayers) {
+      throw new Error(`Monopoly requires ${GAME_CONFIGS['monopoly'].minPlayers} to ${GAME_CONFIGS['monopoly'].maxPlayers} players.`);
+    }
+
     return {
       status: 'LOBBY',
       players: playerIds.map(id => ({
@@ -38,7 +42,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       ownership: {},
       mortgagedProperties: {},
       buildings: {},
-      bankMoney: 20580,
+      bankMoney: Infinity,
       activeTrade: null,
       chanceDeck: shuffleArray(CHANCE_CARDS.map(c => c.id), rng),
       chestDeck: shuffleArray(COMMUNITY_CHEST_CARDS.map(c => c.id), rng)
@@ -156,6 +160,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
 
         // Space Resolution
         let resolving = true;
+        let cardRentMultiplier: 'DOUBLE_RR' | 'FORCE_10X_UTIL' | null = null;
         while (resolving) {
           resolving = false;
           const landedSpace = BOARD_SPACES[currentPlayer.position];
@@ -173,9 +178,14 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
                 } else if (landedSpace!.colorGroup === 'Railroad') {
                   const rrOwned = BOARD_SPACES.filter(s => s.colorGroup === 'Railroad' && nextState.ownership[s.id] === ownerId).length;
                   if (rrOwned > 0) rent = 25 * Math.pow(2, rrOwned - 1);
+                  // Chance card "Advance to nearest Railroad" doubles the rent
+                  if (cardRentMultiplier === 'DOUBLE_RR') rent *= 2;
                 } else if (landedSpace!.colorGroup === 'Utility') {
                   const utilOwned = BOARD_SPACES.filter(s => s.colorGroup === 'Utility' && nextState.ownership[s.id] === ownerId).length;
-                  if (utilOwned === 1) rent = (dice1 + dice2) * 4;
+                  if (cardRentMultiplier === 'FORCE_10X_UTIL') {
+                    // Chance card "Advance to nearest Utility" forces 10x dice
+                    rent = (dice1 + dice2) * 10;
+                  } else if (utilOwned === 1) rent = (dice1 + dice2) * 4;
                   else if (utilOwned === 2) rent = (dice1 + dice2) * 10;
                 } else if (landedSpace!.colorGroup) {
                   const groupSpaces = BOARD_SPACES.filter(s => s.colorGroup === landedSpace!.colorGroup);
@@ -247,6 +257,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
                     events.push({ type: 'PASSED_GO', playerId: currentPlayer.id, amount: 200 });
                   }
                   currentPlayer.position = target;
+                  cardRentMultiplier = 'DOUBLE_RR';
                   resolving = true;
                   break;
                 }
@@ -259,6 +270,7 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
                     events.push({ type: 'PASSED_GO', playerId: currentPlayer.id, amount: 200 });
                   }
                   currentPlayer.position = target;
+                  cardRentMultiplier = 'FORCE_10X_UTIL';
                   resolving = true;
                   break;
                 }
@@ -418,6 +430,15 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       case 'END_TURN': {
         currentPlayer.hasRolled = false;
         currentPlayer.doublesCount = 0;
+        
+        // Safety: check if only one active player remains (guard against infinite loop)
+        const activePlayers = nextState.players.filter((p: IMonopolyPlayer) => p.status === 'ACTIVE');
+        if (activePlayers.length <= 1) {
+          nextState.status = 'FINISHED';
+          events.push({ type: 'GAME_OVER', winnerId: activePlayers.length === 1 ? activePlayers[0]!.id : null });
+          break;
+        }
+        
         do {
           nextState.currentPlayerIndex = (nextState.currentPlayerIndex + 1) % nextState.players.length;
         } while (nextState.players[nextState.currentPlayerIndex]!.status === 'BANKRUPT');
@@ -598,6 +619,15 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
           const fromPlayer = nextState.players.find((p: IMonopolyPlayer) => p.id === trade.fromPlayerId);
           const toPlayer = nextState.players.find((p: IMonopolyPlayer) => p.id === trade.toPlayerId);
           if (fromPlayer && toPlayer) {
+            // Re-validate sufficient funds at acceptance time
+            if (fromPlayer.money < trade.offeredMoney) {
+              nextState.activeTrade = null;
+              return { success: false, error: 'PROPOSER_INSUFFICIENT_FUNDS' };
+            }
+            if (toPlayer.money < trade.requestedMoney) {
+              return { success: false, error: 'INSUFFICIENT_FUNDS' };
+            }
+            
             fromPlayer.money -= trade.offeredMoney;
             fromPlayer.money += trade.requestedMoney;
             toPlayer.money -= trade.requestedMoney;
@@ -605,9 +635,27 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
 
             trade.offeredProperties.forEach((propId: PropertyId) => {
               nextState.ownership[propId] = toPlayer.id;
+              // Transfer mortgaged properties: new owner pays 10% interest immediately
+              if (nextState.mortgagedProperties[propId]) {
+                const space = BOARD_SPACES.find(s => s.id === propId);
+                if (space && space.price) {
+                  const interest = Math.ceil(Math.floor(space.price / 2) * 0.1);
+                  toPlayer.money -= interest;
+                  nextState.bankMoney += interest;
+                }
+              }
             });
             trade.requestedProperties.forEach((propId: PropertyId) => {
               nextState.ownership[propId] = fromPlayer.id;
+              // Transfer mortgaged properties: new owner pays 10% interest immediately
+              if (nextState.mortgagedProperties[propId]) {
+                const space = BOARD_SPACES.find(s => s.id === propId);
+                if (space && space.price) {
+                  const interest = Math.ceil(Math.floor(space.price / 2) * 0.1);
+                  fromPlayer.money -= interest;
+                  nextState.bankMoney += interest;
+                }
+              }
             });
 
             nextState.activeTrade = null;
@@ -753,8 +801,8 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
     }
 
     
-    if (action.type === 'ROLL_DICE' && currentPlayer.hasRolled) return false;
-    if (action.type === 'END_TURN' && !currentPlayer.hasRolled) return false;
+    if (action.type === 'ROLL_DICE') return !currentPlayer.hasRolled;
+    if (action.type === 'END_TURN') return currentPlayer.hasRolled;
     if (action.type === 'PAY_JAIL_FINE') {
       return currentPlayer.inJail && !currentPlayer.hasRolled && currentPlayer.money >= 50;
     }
@@ -834,8 +882,14 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
     if (action.type === 'CANCEL_TRADE') {
       return !!currentState.activeTrade && currentState.activeTrade.fromPlayerId === action.playerId;
     }
-    
-    // Simplistic validation for MVP
-    return true;
+
+    if (action.type === 'BUY_PROPERTY') {
+      const space = BOARD_SPACES[currentPlayer.position];
+      if (!space || space.type !== 'PROPERTY' || !space.price) return false;
+      if (currentState.ownership[space.id]) return false;
+      return currentPlayer.money >= space.price;
+    }
+
+    return false;
   }
 };
