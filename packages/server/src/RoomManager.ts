@@ -1,6 +1,6 @@
 import { Room } from './Room';
 import { IGameEngine, IGameState, IPlayerAction, IGameEvent } from '@packages/engine-core';
-import { RedisStore } from './RedisStore';
+import { RedisStore, redisReviver } from './RedisStore';
 
 const ROOM_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
@@ -52,12 +52,13 @@ export class RoomManager {
       const dataStr = await RedisStore.get(key);
       if (!dataStr) continue;
       try {
-        const data = JSON.parse(dataStr);
+        const data = JSON.parse(dataStr, redisReviver);
         const engine = engines[data.gameType];
         if (!engine) continue;
-        
-        // Mock RNG for rehydration, it's not used directly during loadState
-        const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, []);
+
+        // Restore the room from its persisted snapshot instead of rebuilding
+        // initial state (which would require real player IDs and reset progress).
+        const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, [], data.state);
         room.loadState(data);
         this.rooms.set(room.id, room);
         this.logger.log(`[RoomManager] Rehydrated room ${room.id} (${data.gameType}) from Redis`);

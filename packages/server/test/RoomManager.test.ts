@@ -104,4 +104,24 @@ describe('RoomManager', () => {
     manager.stopCleanup();
     expect((manager as any).cleanupTimer).toBeNull();
   });
+
+  it('rehydrates rooms from the store without re-running initial state (regression: empty player list threw)', async () => {
+    // Create a room (2 players = valid Monopoly min). Its constructor persists a
+    // snapshot to the store. Capture the state so we can assert it's restored.
+    const source = makeRoom('restore-me');
+    const expectedState = source.getState();
+
+    const manager = new RoomManager();
+    await manager.initFromRedis({ monopoly: MonopolyEngine } as any);
+
+    const restored = manager.getRoom('restore-me');
+    expect(restored).toBeDefined();
+    expect(restored?.getState()).toEqual(expectedState);
+
+    // Regression: Monopoly's unlimited bank must survive the JSON round-trip
+    // (JSON.stringify turns Infinity into null without the tagged replacer/reviver).
+    const restoredState = restored?.getState() as { bankMoney?: unknown };
+    expect(restoredState.bankMoney).toBe(Infinity);
+    manager.stopCleanup();
+  });
 });

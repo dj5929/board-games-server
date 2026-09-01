@@ -20,7 +20,13 @@ interface Props {
 }
 
 interface Toast {
-  id: number;
+  id: string;
+  msg: string;
+}
+
+interface EventLogEntry {
+  id: string;
+  time: string;
   msg: string;
 }
 
@@ -30,7 +36,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [drawnCard, setDrawnCard] = useState<{ deck: 'CHANCE' | 'CHEST', text: string } | null>(null);
-  const [eventLog, setEventLog] = useState<{ id: number, time: string, msg: string }[]>([]);
+  const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const [showEventLog, setShowEventLog] = useState(false);
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
   const [showTradeManager, setShowTradeManager] = useState(false);
@@ -66,7 +72,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
         }, 50);
       } else if (data.type === 'EVENTS') {
         const processEvents = (events: any[]) => {
-          const newEvents: { id: number, time: string, msg: string }[] = [];
+          const newEvents: EventLogEntry[] = [];
           events.forEach((ev: any) => {
             let msg = '';
             if (ev.type === 'PROPERTY_BOUGHT') {

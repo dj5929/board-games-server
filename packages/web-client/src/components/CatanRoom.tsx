@@ -21,7 +21,13 @@ interface Props {
 }
 
 interface Toast {
-  id: number;
+  id: string;
+  msg: string;
+}
+
+interface EventLogEntry {
+  id: string;
+  time: string;
   msg: string;
 }
 
@@ -29,7 +35,7 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
   const [state, setState] = useState<ICatanState | null>(null);
   const [error, setError] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [eventLog, setEventLog] = useState<{ id: number, time: string, msg: string }[]>([]);
+  const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const [showEventLog, setShowEventLog] = useState(false);
   const [diceRoll, setDiceRoll] = useState<{dice1: number, dice2: number} | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);

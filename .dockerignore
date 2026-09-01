@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+packages/*/dist
+**/*.tsbuildinfo
+.git
+.github
+*.md
+**/__tests__
+**/test
+**/*.test.ts
+**/*.spec.ts
+packages/*/test

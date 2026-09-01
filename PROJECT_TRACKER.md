@@ -233,8 +233,17 @@ This document tracks the high-level roadmap, detailed implementation specificati
 ## 🟡 Active & Remaining Roadmap
 
 ### 🟡 Infrastructure & Deployment (Phase 32)
-- 🔴 **Containerization:** Containerize Fastify server and Vite client with Dockerfile and `docker-compose.yml`.
-- 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances (since Redis state is already integrated).
+- 🟢 **Containerization:** Containerized the Fastify server and Vite client with multi-stage Dockerfiles and a `docker-compose.yml`.
+  - `packages/server/Dockerfile` — Multi-stage (Node 24 alpine): builds the server to `dist/server.js` via `tsc` (compiling referenced `@packages/*` sources), then a slim runtime stage installs prod deps (incl. `tsx`, moved to a prod dep so `tsx dist/server.js` can transpile the `.ts` workspace entry points) and runs the identical command used locally.
+  - `packages/web-client/Dockerfile` — Multi-stage: builds the Vite bundle (with `VITE_API_URL` as a build arg) and serves static assets via nginx with an SPA-fallback config.
+  - `docker-compose.yml` — Orchestrates `redis` (with `appendonly` persistence + healthcheck), `server`, and `client`; wires `REDIS_URL`, `PORT`, `HOST`, and `CORS_ORIGIN` envs; publishes server :3000 and client :5173.
+  - `.env.example` documents `CLIENT_ORIGIN` / `CLIENT_API_URL`.
+- 🟢 **Env-Driven Configuration:** `packages/server/src/server.ts` now reads `PORT` (default 3000), `HOST` (default `0.0.0.0` for container networking), and `CORS_ORIGIN` (comma-separated allow-list; default `http://localhost:5173,http://localhost:8080`). Verified the preflight `Access-Control-Allow-Origin` reflects the configured origin and rejects untrusted origins.
+- 🟢 **Containerization Verified (live):** Docker engine + compose plugin installed on the dev machine; `docker compose build` builds both images and `docker compose up -d` runs `redis` + `server` + `client`. Verified: client serves on :5173, server API creates rooms on :3000, WebSocket auth + per-player Scotland Yard projection work, CORS allow-list blocks untrusted origins, and room state is persisted to Redis (`redis-cli KEYS room:*`).
+- 🟢 **Crash-Recovery Bug Fixed (found in container test):** `RoomManager.initFromRedis` rehydrated rooms with an empty player list, so `Room`'s constructor threw (`engine.getInitialState([])` → "requires X players") and **no room ever survived a restart**. The `Room` constructor now accepts an optional persisted `initialState` snapshot. Verified live: restart the server container → previously-created rooms rehydrate and remain joinable.
+- 🟢 **Persistence `Infinity` Bug Fixed (found in container test):** `JSON.stringify` converts Monopoly's `bankMoney: Infinity` to `null`, so persisted rooms came back with a broken bank. Added `redisReplacer`/`redisReviver` (tagged-`Infinity` streaming) in `RedisStore.ts`; verified the snapshot stores `"__JSON_INFINITY__"` and rehydration restores the real value.
+- 🟢 **Client Build Fix (pre-existing bug):** The production `web-client` build was failing because `EventLogEntry`/`Toast.id` were typed `number` while Phase 31 replaced `Math.random` with `crypto.randomUUID()` (string). Updated the types to `string` in `GameRoom.tsx` / `CatanRoom.tsx` so `tsc -b` passes again.
+- 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances (since Redis state is already integrated) — still outstanding.
 - 🟢 **Security & Systems Audit:** All open findings from `FINAL_AUDIT.md` have been fully resolved in Phase 31.
 
 ---

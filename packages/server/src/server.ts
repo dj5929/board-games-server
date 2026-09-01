@@ -22,11 +22,19 @@ export const ENGINES: Record<string, IGameEngine<IGameState, IPlayerAction, IGam
   'scotland-yard': ScotlandYardEngine
 };
 
+const DEFAULT_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:8080'];
+const HOST = process.env.HOST ?? '0.0.0.0';
+const PORT = Number(process.env.PORT) || 3000;
+const CORS_ORIGINS = (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(','))
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 export const buildApp = (logger: boolean = true) => {
   const fastify = Fastify({ logger });
   roomManager.setLogger({ log: (msg: string) => fastify.log.info(msg) });
 
-  fastify.register(cors, { origin: ['http://localhost:5173'] });
+  fastify.register(cors, { origin: CORS_ORIGINS });
   fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
   fastify.register(fastifyWebsocket);
 
@@ -176,7 +184,7 @@ export const start = async () => {
   await roomManager.initFromRedis(ENGINES);
   const fastify = buildApp(false);
   try {
-    await fastify.listen({ port: 3000 });
+    await fastify.listen({ port: PORT, host: HOST });
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

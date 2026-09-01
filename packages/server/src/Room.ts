@@ -1,6 +1,6 @@
 import { IGameEngine, IGameState, IPlayerAction, IGameEvent, IRandomProvider, playerId } from '@packages/engine-core';
 import crypto from 'node:crypto';
-import { RedisStore } from './RedisStore';
+import { RedisStore, redisReplacer } from './RedisStore';
 
 export interface IClientConnection {
   send(data: string): void;
@@ -20,9 +20,10 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     public readonly gameType: string,
     private engine: IGameEngine<S, A, E>,
     private rng: IRandomProvider,
-    initialPlayerIds: string[]
+    initialPlayerIds: string[],
+    initialState?: S
   ) {
-    this.state = this.engine.getInitialState(initialPlayerIds.map(id => playerId(id)), this.rng);
+    this.state = initialState ?? this.engine.getInitialState(initialPlayerIds.map(id => playerId(id)), this.rng);
     this.lastActivity = Date.now();
     this.saveState();
   }
@@ -37,7 +38,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       disconnectedAt: Array.from(this.disconnectedAt.entries()),
       lastActivity: this.lastActivity
     };
-    await RedisStore.set(`room:${this.id}`, JSON.stringify(data));
+    await RedisStore.set(`room:${this.id}`, JSON.stringify(data, redisReplacer));
   }
 
   // Restore state from Redis (used by RoomManager)

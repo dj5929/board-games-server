@@ -147,6 +147,24 @@ This document tracks identified bugs, type safety issues, and planned improvemen
   11. **LOW-10 (dev-card shared reference):** `CatanEngine.reduce` deep-copies development cards while cloning players, so `END_TURN`'s `boughtThisTurn = false` no longer mutates shared references.
 - **Status:** ✅ Fixed — added tests (server identity binding, ACTION_REJECTED, socket-close-on-reconnect/cleanup, schema per-game strictness, Catan Road Building connectivity + projections, Monopoly double-roll + projections, SY identity, Catan dev-card immutability). Full suite green (26 files / 284 tests), typecheck, lint, server build, and web-client `tsc -b` + tests all green.
 
+### 12. Web Client Production Build Broken (EventLog / Toast `id` typed `number`)
+- **Location:** `packages/web-client/src/components/GameRoom.tsx`, `packages/web-client/src/components/CatanRoom.tsx`
+- **Issue:** Phase 31 replaced `Math.random()` toast/event-log IDs with `crypto.randomUUID()` (a string), but the `Toast.id` and `eventLog` entry types were still declared `id: number`. This caused `tsc -b` to fail (`Type '...-...' is not assignable to type 'number'`), breaking the production `web-client` build (and thus the new Docker image build).
+- **Fix:** Changed `Toast.id` and the local `EventLogEntry.id` types to `string` in both `GameRoom.tsx` and `CatanRoom.tsx` (mirroring the existing `useEventLog.ts` hook which already used `id: string`).
+- **Status:** ✅ Fixed — `npm run build --workspace web-client` passes cleanly (verified `tsc -b && vite build`), web-client tests 37/37 green, lint clean.
+
+### 13. Redis Rehydration Broken — `Room` Constructor Threw on Empty Player List
+- **Location:** `packages/server/src/RoomManager.ts`, `packages/server/src/Room.ts`
+- **Issue:** `RoomManager.initFromRedis` rehydrated persisted rooms with `new Room(..., [], ...)` — an empty player list. But the `Room` constructor eagerly calls `engine.getInitialState(initialPlayerIds.map(playerId), rng)`, which throws for every game ("Catan requires 3 to 4 players." / "Scotland Yard requires 3 to 6 players." / "Monopoly requires 2 to 8 players."), so every room was logged as "Failed to parse" and **no room survived a restart**. All crash-recovery capability from Phase 31 was non-functional. Uncovered by the containerization crash-recovery test.
+- **Fix:** The `Room` constructor now accepts an optional `initialState?: S`. When present, it skips `getInitialState` and uses the persisted snapshot directly; `initFromRedis` passes `data.state`. Sockets, session tokens, stale timers, and `lastActivity` are still restored via `loadState`.
+- **Status:** ✅ Fixed — added a rehydration regression test in `packages/server/test/RoomManager.test.ts`; verified live against the compose stack (server restart + join still returns the previously-created room with intact state).
+
+### 14. Persistence Loses `Infinity` (Monopoly Unlimited Bank → `null`)
+- **Location:** `packages/server/src/RedisStore.ts`, `packages/server/src/Room.ts`, `packages/server/src/RoomManager.ts`
+- **Issue:** JSON cannot represent `Infinity`. `Room.saveState()` used `JSON.stringify(data)`, turning Monopoly's `bankMoney: Infinity` (Phase 27 unlimited bank) into `null` in the Redis snapshot. After a restart, the rehydrated room had `bankMoney: null`, corrupting the engine's money arithmetic. Uncovered by the containerization crash-recovery test.
+- **Fix:** Added `redisReplacer` / `redisReviver` to `RedisStore.ts` that tag-stream `Infinity`/`-Infinity`/`NaN` (`__JSON_INFINITY__` sentinel). `saveState()` serializes with the replacer; `initFromRedis` parses with the reviver, restoring real values.
+- **Status:** ✅ Fixed — regression test asserts `bankMoney === Infinity` after rehydration; verified live that the snapshot stores `"__JSON_INFINITY__"` and the rehydrated room state is intact.
+
 ---
 
 ## 🔴 Planned Improvements & Known Issues
