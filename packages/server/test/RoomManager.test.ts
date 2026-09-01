@@ -3,8 +3,11 @@ import { RoomManager } from '../src/RoomManager';
 import { Room } from '../src/Room';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 
-function makeRoom(id: string) {
-  return new Room(id, 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2']);
+function makeRoom(id: string, isHotSeat = false) {
+  return new Room(id, 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2'], undefined, {
+    isHotSeat,
+    ownerPlayerId: isHotSeat ? 'p1' : null
+  });
 }
 
 describe('RoomManager', () => {
@@ -122,6 +125,18 @@ describe('RoomManager', () => {
     // (JSON.stringify turns Infinity into null without the tagged replacer/reviver).
     const restoredState = restored?.getState() as { bankMoney?: unknown };
     expect(restoredState.bankMoney).toBe(Infinity);
+    manager.stopCleanup();
+  });
+
+  it('rehydrates hot-seat flags and the owner session (regression: owner lost on restart)', async () => {
+    makeRoom('hotseat', true);
+
+    const manager = new RoomManager();
+    await manager.initFromRedis({ monopoly: MonopolyEngine } as any);
+
+    const restored = manager.getRoom('hotseat');
+    expect(restored?.isHotSeat).toBe(true);
+    expect(restored?.ownerPlayerId).toBe('p1');
     manager.stopCleanup();
   });
 });

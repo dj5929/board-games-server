@@ -58,7 +58,12 @@ export class RoomManager {
 
         // Restore the room from its persisted snapshot instead of rebuilding
         // initial state (which would require real player IDs and reset progress).
-        const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, [], data.state);
+        // Hot-seat flags are persisted and restored so the owner keeps its
+        // "acts for any seat" capability across a server restart.
+        const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, [], data.state, {
+          isHotSeat: data.isHotSeat === true,
+          ownerPlayerId: data.ownerPlayerId ?? null
+        });
         room.loadState(data);
         this.rooms.set(room.id, room);
         this.logger.log(`[RoomManager] Rehydrated room ${room.id} (${data.gameType}) from Redis`);

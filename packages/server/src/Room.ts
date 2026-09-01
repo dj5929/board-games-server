@@ -7,6 +7,16 @@ export interface IClientConnection {
   close?(): void;
 }
 
+export interface IRoomOptions {
+  /** Hot-seat rooms are played from a single shared browser. The room's owner
+   *  session is then allowed to dispatch actions for *any* seat, because all
+   *  seats belong to the same physical screen. Online rooms keep one-seat-one-token. */
+  isHotSeat?: boolean;
+  /** The seat whose session may act for every seat in a hot-seat room
+   *  (normally the room's creator, i.e. `p1`). */
+  ownerPlayerId?: string | null;
+}
+
 export class Room<S extends IGameState, A extends IPlayerAction, E extends IGameEvent> {
   private state: S;
   private connections: Map<string, IClientConnection> = new Map();
@@ -14,6 +24,8 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   public tokenIssuedAt: Map<string, number> = new Map();
   public disconnectedAt: Map<string, number> = new Map();
   public lastActivity: number;
+  public readonly isHotSeat: boolean;
+  public readonly ownerPlayerId: string | null;
 
   constructor(
     public readonly id: string,
@@ -21,11 +33,19 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     private engine: IGameEngine<S, A, E>,
     private rng: IRandomProvider,
     initialPlayerIds: string[],
-    initialState?: S
+    initialState?: S,
+    options: IRoomOptions = {}
   ) {
     this.state = initialState ?? this.engine.getInitialState(initialPlayerIds.map(id => playerId(id)), this.rng);
     this.lastActivity = Date.now();
+    this.isHotSeat = options.isHotSeat ?? false;
+    this.ownerPlayerId = options.ownerPlayerId ?? null;
     this.saveState();
+  }
+
+  /** True when the given id corresponds to a seat in this room's game state. */
+  public hasPlayer(playerId: string): boolean {
+    return this.state.players.some(p => p.id === playerId);
   }
 
   public async saveState() {
@@ -33,6 +53,8 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       id: this.id,
       gameType: this.gameType,
       state: this.state,
+      isHotSeat: this.isHotSeat,
+      ownerPlayerId: this.ownerPlayerId,
       sessionTokens: Array.from(this.sessionTokens.entries()),
       tokenIssuedAt: Array.from(this.tokenIssuedAt.entries()),
       disconnectedAt: Array.from(this.disconnectedAt.entries()),
@@ -48,6 +70,11 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     this.tokenIssuedAt = new Map(data.tokenIssuedAt || []);
     this.disconnectedAt = new Map(data.disconnectedAt || []);
     this.lastActivity = data.lastActivity;
+    // `isHotSeat`/`ownerPlayerId` are `readonly` fields set by the constructor,
+    // so restore them via the optional snapshot-backed constructor values
+    // (see RoomManager.initFromRedis) rather than direct reassignment.
+    (this as { isHotSeat: boolean }).isHotSeat = data.isHotSeat === true;
+    (this as { ownerPlayerId: string | null }).ownerPlayerId = data.ownerPlayerId ?? null;
   }
 
   public getState(): S {
@@ -101,8 +128,11 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   }
 
   private sendRejected(playerId: string, error: string) {
-    const conn = this.connections.get(playerId);
-    if (conn) {
+    let conn = this.connections.get(playerId);
+    if (!conn && this.isHotSeat && this.ownerPlayerId) {
+      conn = this.connections.get(this.ownerPlayerId);
+    }
+    if (conn && typeof conn.send === 'function') {
       conn.send(JSON.stringify({ type: 'ACTION_REJECTED', error }));
     }
   }

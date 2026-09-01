@@ -26,7 +26,7 @@ export function Lobby({ onJoinRoom }: Props) {
       const res = await fetch(`${API_URL}/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerCount, gameType })
+        body: JSON.stringify({ playerCount, gameType, hotSeat: mode === 'local' })
       });
       const data = await res.json();
       if (data.roomId) {

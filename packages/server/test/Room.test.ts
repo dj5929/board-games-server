@@ -104,4 +104,18 @@ describe('Room', () => {
     expect(p1Close).toHaveBeenCalledTimes(1);
     expect(p2Close).toHaveBeenCalledTimes(1);
   });
+
+  it('carries hot-seat flags and validates seat membership (hot-seat regression)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('hot-room', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2'], undefined, {
+      isHotSeat: true,
+      ownerPlayerId: 'p1'
+    });
+
+    expect(room.isHotSeat).toBe(true);
+    expect(room.ownerPlayerId).toBe('p1');
+    expect(room.hasPlayer('p1')).toBe(true);
+    expect(room.hasPlayer('p2')).toBe(true);
+    expect(room.hasPlayer('intruder')).toBe(false);
+  });
 });

@@ -38,7 +38,7 @@ export const buildApp = (logger: boolean = true) => {
   fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
   fastify.register(fastifyWebsocket);
 
-  fastify.post<{ Body: { playerCount?: number; gameType?: string } }>('/rooms', async (request, reply) => {
+  fastify.post<{ Body: { playerCount?: number; gameType?: string; hotSeat?: boolean } }>('/rooms', async (request, reply) => {
     const body = request.body || {};
     const gameType = body.gameType || 'monopoly';
 
@@ -65,14 +65,20 @@ export const buildApp = (logger: boolean = true) => {
       return reply.status(400).send({ error: 'Unknown game type' });
     }
 
-    const room = new Room<IGameState, IPlayerAction, IGameEvent>(roomId, gameType, engine, CryptoRandomProvider, playerIds);
+    // Hot-seat rooms are driven by a single shared browser, so the creator's
+    // session may act for any seat (see the WS dispatch rule below).
+    const isHotSeat = body.hotSeat === true;
+    const room = new Room<IGameState, IPlayerAction, IGameEvent>(
+      roomId, gameType, engine, CryptoRandomProvider, playerIds, undefined,
+      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null }
+    );
     roomManager.createRoom(room);
 
     // Auto-join the creator to the first available slot
     const playerId = playerIds[0]!;
     const sessionToken = room.issueSessionToken(playerId);
 
-    return { roomId, playerIds, gameType, playerId, sessionToken };
+    return { roomId, playerIds, gameType, isHotSeat, playerId, sessionToken };
   });
 
   fastify.post<{ Params: { roomId: string } }>('/rooms/:roomId/join', async (request, reply) => {
@@ -159,7 +165,16 @@ export const buildApp = (logger: boolean = true) => {
           const action = actionSchema.parse(parsed);
           // CRITICAL-1: force playerId to the authenticated socket identity,
           // ignoring any client-supplied value to prevent impersonation.
-          room.dispatch({ ...(action as object), playerId } as Parameters<typeof room.dispatch>[0]);
+          // EXCEPTION (hot-seat): in a hot-seat room every seat belongs to the
+          // owner's single shared browser, so the owner's session is trusted to
+          // dispatch on behalf of any of the room's seats. Other seats in the
+          // same room (e.g. online joiners) stay strictly bound to their own id.
+          let dispatchPlayerId: string = playerId;
+          const claimedPlayerId = (action as { playerId?: string }).playerId;
+          if (room.isHotSeat && playerId === room.ownerPlayerId && claimedPlayerId && room.hasPlayer(claimedPlayerId)) {
+            dispatchPlayerId = claimedPlayerId;
+          }
+          room.dispatch({ ...(action as object), playerId: dispatchPlayerId } as Parameters<typeof room.dispatch>[0]);
         } catch {
           socket.send(JSON.stringify({ type: 'ERROR', error: 'Invalid payload' }));
         }

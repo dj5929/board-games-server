@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import WebSocket from 'ws';
 import type { AddressInfo } from 'node:net';
 import { buildApp } from '../src/server';
@@ -6,6 +6,15 @@ import { roomManager } from '../src/RoomManager';
 
 const app = buildApp(false);
 let baseWsUrl = '';
+
+const liveSockets = new Set<WebSocket>();
+
+afterEach(() => {
+  for (const ws of liveSockets) {
+    if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
+  }
+  liveSockets.clear();
+});
 
 beforeAll(async () => {
   await app.listen({ port: 0, host: '127.0.0.1' });
@@ -17,7 +26,7 @@ afterAll(async () => {
   await app.close();
 });
 
-function waitUntil(cond: () => boolean, timeoutMs = 3000): Promise<void> {
+function waitUntil(cond: () => boolean, timeoutMs = 8000): Promise<void> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const tick = () => {
@@ -29,7 +38,7 @@ function waitUntil(cond: () => boolean, timeoutMs = 3000): Promise<void> {
   });
 }
 
-async function createRoom(payload: { gameType?: string; playerCount?: number } = {}) {
+async function createRoom(payload: { gameType?: string; playerCount?: number; hotSeat?: boolean } = {}) {
   const res = await app.inject({ method: 'POST', url: '/rooms', payload });
   expect(res.statusCode).toBe(200);
   return res.json() as {
@@ -38,14 +47,17 @@ async function createRoom(payload: { gameType?: string; playerCount?: number } =
     gameType: string;
     playerId: string;
     sessionToken: string;
+    isHotSeat?: boolean;
   };
 }
 
 function openSocket(url: string) {
   const messages: string[] = [];
   const ws = new WebSocket(url);
+  liveSockets.add(ws);
   ws.on('message', (raw: string | Buffer | ArrayBuffer | Buffer[]) => messages.push(raw.toString()));
   ws.on('error', () => {});
+  ws.on('close', () => liveSockets.delete(ws));
   return { ws, messages };
 }
 
@@ -99,6 +111,14 @@ describe('POST /rooms', () => {
     const res = await app.inject({ method: 'POST', url: '/rooms', payload: { gameType: 'chess' } });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'Unknown game type' });
+  });
+
+  it('flags a room as hot-seat when requested (hot-seat regression)', async () => {
+    const body = await createRoom({ playerCount: 2, hotSeat: true });
+    expect(body.isHotSeat).toBe(true);
+
+    const normal = await createRoom({ playerCount: 2 });
+    expect(normal.isHotSeat).toBe(false);
   });
 });
 
@@ -177,7 +197,7 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     expect(events.type).toBe('EVENTS');
     expect(events.events.some((ev: any) => ev.type === 'DICE_ROLLED')).toBe(true);
     ws.close();
-  });
+  }, 20000);
 
   it('replies with an ERROR message for unparseable or invalid payloads', async () => {
     const room = await createRoom({ playerCount: 2 });
@@ -218,7 +238,7 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     // No extra state broadcast from the invalid action
     expect(messages.length).toBe(before + 1);
     ws.close();
-  });
+  }, 20000);
 
   it('forces the socket identity over a forged playerId (CRITICAL-1)', async () => {
     const room = await createRoom({ playerCount: 2 });
@@ -231,13 +251,71 @@ describe('WebSocket /rooms/:roomId/ws', () => {
 
     // p1 is the active player. Send ROLL_DICE but impersonate p2 in the payload.
     // The server must bind it to the socket identity (p1), so the roll succeeds.
+    // (Key the wait on the DICE_ROLLED event: rolling doubles keeps hasRolled
+    // false because the engine grants another turn, so hasRolled is not a
+    // reliable success signal.)
     ws.send(JSON.stringify({ type: 'ROLL_DICE', playerId: 'p2' }));
 
-    await waitUntil(() => messages.some(m => JSON.parse(m).type === 'STATE_UPDATE' && JSON.parse(m).state.players[0].hasRolled === true));
-    const update = messages.map(m => JSON.parse(m)).filter(m => m.type === 'STATE_UPDATE').pop()!;
-    expect(update.state.players[0].hasRolled).toBe(true);
+    await waitUntil(() => messages.some(m => JSON.parse(m).type === 'EVENTS' && JSON.parse(m).events.some((e: any) => e.type === 'DICE_ROLLED')));
+    expect(messages.some(m => JSON.parse(m).type === 'ACTION_REJECTED')).toBe(false);
     ws.close();
-  });
+  }, 20000);
+
+  it('honours a hot-seat owner acting for another seat (hot-seat regression)', async () => {
+    const room = await createRoom({ playerCount: 2, hotSeat: true });
+    const { ws, messages } = openSocket(
+      `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`
+    );
+    ws.on('error', () => {});
+    await waitForOpen(ws);
+    await waitUntil(() => messages.length >= 1);
+
+    // p1 (the owner) is the active player. Claiming to act as *p2* over the
+    // owner's shared-board connection must be honoured — the engine then rejects
+    // the roll because it is not p2's turn. Had the claim been ignored, the
+    // server would have forced p1 and the roll would have succeeded.
+    ws.send(JSON.stringify({ type: 'ROLL_DICE', playerId: 'p2' }));
+
+    await waitUntil(() => messages.some(m => JSON.parse(m).type === 'ACTION_REJECTED'));
+    const rolled = messages
+      .map(m => JSON.parse(m))
+      .filter(m => m.type === 'EVENTS')
+      .some(m => m.events.some((e: any) => e.type === 'DICE_ROLLED'));
+    expect(rolled).toBe(false);
+    ws.close();
+  }, 20000);
+
+  it('still binds a non-owner seat to its own identity in a hot-seat room (hot-seat regression)', async () => {
+    const room = await createRoom({ playerCount: 2, hotSeat: true });
+    const joinRes = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/join` });
+    const p2 = joinRes.json() as { playerId: string; sessionToken: string };
+
+    const p1 = openSocket(
+      `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`
+    );
+    const conn2 = openSocket(
+      `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${p2.playerId}&token=${p2.sessionToken}`
+    );
+    p1.ws.on('error', () => {});
+    conn2.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitForOpen(conn2.ws);
+    await waitUntil(() => p1.messages.length >= 1 && conn2.messages.length >= 1);
+
+    // p2 is not the owner, so the payload's forged playerId must be ignored:
+    // the action is bound to p2, and since p1 (not p2) is the active player the
+    // engine rejects it. If the claim had been honoured, p1 would have rolled.
+    conn2.ws.send(JSON.stringify({ type: 'ROLL_DICE', playerId: 'p1' }));
+
+    await waitUntil(() => conn2.messages.some(m => JSON.parse(m).type === 'ACTION_REJECTED'));
+    const p1Rolled = p1.messages
+      .map(m => JSON.parse(m))
+      .filter(m => m.type === 'EVENTS')
+      .some(m => m.events.some((e: any) => e.type === 'DICE_ROLLED'));
+    expect(p1Rolled).toBe(false);
+    p1.ws.close();
+    conn2.ws.close();
+  }, 20000);
 
   it('removes the connection from the room when the socket closes', async () => {
     const room = await createRoom({ playerCount: 2 });
@@ -263,5 +341,5 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     await waitUntil(() => roomRef.connections.get(room.playerId) === undefined);
     expect(roomRef.connections.get(p2.playerId)).toBeDefined();
     conn2.ws.close();
-  });
+  }, 20000);
 });

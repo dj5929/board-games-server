@@ -16,7 +16,7 @@ Games currently implemented:
 ## ✨ Highlights
 
 - **Pure, deterministic game engines** — each engine is an immutable state machine (a `reducer(state, action)`), making gameplay rules fully unit-testable and free of hidden side effects.
-- **Real-time multiplayer** — WebSocket-driven rooms with crypto-random room IDs and per-session tokens to keep connections secure. Both **hot-seat** (local) and **online** (join rooms by ID from another machine) modes are fully playable.
+- **Real-time multiplayer** — WebSocket-driven rooms with crypto-random room IDs and per-session tokens to keep connections secure. Both **online** (join rooms by ID from another machine) and **local hot-seat** are supported; hot-seat rooms flag the owner session, which drives any seat on the shared board while online joiners stay strictly bound to their own identity (see [FIXES.md](./FIXES.md) and [ARCHITECTURE.md](./docs/ARCHITECTURE.md) §5.3).
 - **Per-game player rules** — the Lobby's player selector adapts to each game's official range (Monopoly 2–8, Catan 3–4, Scotland Yard 3–6), enforced at both the server and engine layers.
 - **Defense in depth validation** — the same Zod schemas validate every action on both the client *and* the server.
 - **Polish** — a rich React UI with contextual HUDs, animated tokens, procedural Web Audio sound effects, and a live event log.
@@ -78,6 +78,8 @@ BoardGameServer/
 
 ## 🗺️ Architecture
 
+> **Full deep-dive:** every nitty-gritty detail of the engines, server, client, hidden-information rules, persistence, and containerization is documented in [**`docs/ARCHITECTURE.md`**](./docs/ARCHITECTURE.md).
+
 The platform is designed around strict, immutable, pure functional state machines for game engines, ensuring deterministic gameplay and 100% testability.
 
 ### Game & UI Data Flow
@@ -129,6 +131,19 @@ flowchart TD
 7. **Broadcast**: The server updates the room's current state and broadcasts this new state to all connected clients in the room via WebSockets.
 8. **UI Re-render (`@packages/web-client`)**: The React application receives the new state, updates the global context/store, and triggers a re-render of the UI to reflect the new game reality (e.g., moving the player's token on the board).
 
+### 💾 Room Snapshotting & "Rehydration"
+
+Game rooms live in the server's memory as `Room` instances (held by `RoomManager`). To survive crashes and restarts, every change to a room is snapshotted into Redis (`room:<id>` key) by `Room.saveState()`.
+
+**"Rehydrating a room"** means restoring one of those snapshots back into live memory. On server boot, `RoomManager.initFromRedis()` reads every `room:*` key and rebuilds the `Room` objects from the JSON snapshots — restoring the exact game state, player connections, session tokens, and timers:
+
+```
+Room (in-memory)  ──saveState()──▶  Redis snapshot  ──initFromRedis()──▶  Room (in-memory)
+  (live game)                        (crash-safe)                     "rehydrated" on boot
+```
+
+The client/server log line `Rehydrated room <id> from Redis` simply means *"a game that existed before the restart was reloaded from Redis and is live again"* — so players reconnect to the same game instead of losing it. If a snapshot can't be restored it is logged as `Failed to parse room` (a real bug here was fixed: rehydration used to throw on an empty player list; see `FIXES.md`).
+
 ### Packages
 - `@packages/engine-core`: Shared interfaces (`IGameEngine`, `IGameState`, `IPlayerAction`) defining the pure state machine boundaries.
 - `@packages/monopoly-engine`: Complete Monopoly ruleset with property management, trading, dice logic, jail rules, bankruptcy, and Chance/Community chest cards.
@@ -160,6 +175,7 @@ The server binds `http://localhost:3000`, serves CORS only to the Vite dev clien
 
 ## 🧭 Engineering Docs
 
+- **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** — Full architecture deep-dive: engine contracts, per-game engine rules, server internals (rooms/sessions/Redis/rehydration), WebSocket protocol, client UI/animation pipeline, hidden-information enforcement, containerization, and known limitations.
 - **[FINAL_AUDIT.md](./FINAL_AUDIT.md)** — Consolidated security & systems audit. Cross-references [AUDIT_REPORT.md](./AUDIT_REPORT.md), [DEEP_AUDIT_REPORT.md](./DEEP_AUDIT_REPORT.md), and [SECURITY_AUDIT_REPORT.md](./SECURITY_AUDIT_REPORT.md). *Note: Phase 31 has fully resolved the open findings in this audit.*
 - **[FIXES.md](./FIXES.md)** — Identified bugs, planned improvements, and implementation diffs.
 - **[COVERAGE.md](./COVERAGE.md)** — Test coverage matrix for all components.

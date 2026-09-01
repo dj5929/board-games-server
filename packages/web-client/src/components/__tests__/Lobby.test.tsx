@@ -39,7 +39,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 2, gameType: 'monopoly' }),
+      body: JSON.stringify({ playerCount: 2, gameType: 'monopoly', hotSeat: true }),
     });
   });
 
@@ -61,7 +61,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 4, gameType: 'catan' }),
+      body: JSON.stringify({ playerCount: 4, gameType: 'catan', hotSeat: true }),
     });
   });
 
