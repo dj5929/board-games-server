@@ -198,7 +198,6 @@ export const buildApp = (logger: boolean = true) => {
 };
 
 export const start = async () => {
-  await roomManager.initFromRedis(ENGINES);
   const fastify = buildApp(false);
   try {
     await fastify.listen({ port: PORT, host: HOST });
@@ -206,6 +205,13 @@ export const start = async () => {
     fastify.log.error(err);
     process.exit(1);
   }
+  // Rehydrate persisted rooms in the background so the server begins serving
+  // immediately rather than delaying time-to-serve behind thousands of Redis
+  // GETs. Rooms become joinable as they are restored. Errors are logged by the
+  // RoomManager and never crash the process.
+  void roomManager.initFromRedis(ENGINES).catch(err => {
+    fastify.log.error(`[RoomManager] Rehydration failed: ${err}`);
+  });
 };
 
 if (typeof require !== 'undefined' && require.main === module) {

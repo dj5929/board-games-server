@@ -283,10 +283,10 @@ A codebase-wide performance review was completed. The following high-level optim
 - 🟢 **Debounce / dirty-flag `saveState()` (Batch 2, `Room.ts`):** `saveState()` now writes the snapshot immediately on the first call in a scheduling tick (preserving write-ordering so a later rehydration read observes it) and coalesces any further calls within the same microtask turn into a single trailing flush — collapsing bursts (room creation constructor write + token issuance, multiple connection events) into one final Redis write instead of many back-to-back serialized writes. On the rehydrate path the constructor's redundant "write-back-what-we-just-read" is skipped entirely (`isRehydrated`).
 
 ### Server: boot rehydration
-- 🔄 **Replace Redis `KEYS` with `SCAN` (`RedisStore.ts`:58-64):** `redis.keys('room:*')` is O(N) over the entire Redis keyspace and blocks the server. Use `SCAN` for incremental iteration.
-- 🔄 **Parallelize rehydration (`RoomManager.ts`:59-83):** Rooms are rehydrated one `await` at a time (10,000 rooms = 10,000 sequential round-trips). Use `Promise.allSettled` in batches.
-- 🔄 **Remove redundant rehydration write:** Each rehydrated `Room` calls `saveState()` in its constructor (`Room.ts:53`), writing the exact state just read from Redis back. Skip the write on the rehydrate path.
-- 🔄 **Defer rehydration off the critical startup path (`server.ts`:200-201):** Currently rehydration completes before Fastify begins listening, delaying time-to-serve. Load rooms asynchronously / lazily.
+- 🟢 **Replace Redis `KEYS` with `SCAN` (Batch 3, `RedisStore.ts`):** `getKeys` now uses `SCAN` with a `COUNT` batch, incrementally iterating `room:*` instead of the O(N)-over-keyspace, blocking `KEYS`. Memory and server blocking both stay bounded even with tens of thousands of rooms. (In-memory dev store path unchanged.)
+- 🟢 **Parallelize rehydration (Batch 3, `RoomManager.ts`):** `initFromRedis` now reads raw snapshots in bounded `Promise.allSettled` batches (50 rooms per batch) and builds all rooms concurrently, instead of one sequential `await` round-trip per room (10k rooms = 10k sequential GETs before). Malformed entries are skipped and logged without aborting the batch.
+- 🟢 **Remove redundant rehydration write (Batch 3, `Room.ts`):** The rehydrate path no longer writes the exact snapshot it just read back to the store — the constructor skips `saveState()` when given a persisted `initialState` (`isRehydrated`).
+- 🟢 **Defer rehydration off the critical startup path (Batch 3, `server.ts`):** `start()` now listens first, then kicks off `roomManager.initFromRedis` in the background (guarded with a `.catch`), so time-to-serve is immediate and persisted rooms become joinable as they restore.
 
 ### Engine: reduce recomputation
 - 🔄 **Incremental Catan awards (`CatanEngine.ts`:88-159):** `checkWinConditionAndAwards` runs the global longest-road DFS + VP recount + largest-army recount on **every action** (21 call sites), including `TRADE_BANK`/`DISCARD_RESOURCES` that cannot affect roads. Gate it to board-mutating/building/dev-card actions, or track road/army/VP totals incrementally in state.
@@ -309,7 +309,7 @@ A codebase-wide performance review was completed. The following high-level optim
 ### Recommended implementation order (lowest risk → highest reward)
 1. ✅ **DONE (Batch 1)** — `React.lazy` + `Suspense` + Vite `manualChunks` + board memoization + `Dice3D` CSS extraction.
 2. ✅ **DONE (Batch 2)** — Deduplicate serialization: one payload serialization per dispatch reused across per-player broadcast + pubsub, with a dirty/coalescing flag on `saveState` (and skipped redundant constructor write on rehydrate).
-3. Rehydration: `SCAN` + parallelize + remove redundant constructor write + defer off critical startup path (Batch 3).
+3. ✅ **DONE (Batch 3)** — Rehydration: `SCAN` + parallelize in batches + skip redundant constructor write + defer off critical startup path.
 4. ✅ **DONE (Batch 1)** — Memoize the three boards + derived data and cut per-render scans.
 5. Gate `checkWinConditionAndAwards` to board-mutating actions (Batch 4).
 

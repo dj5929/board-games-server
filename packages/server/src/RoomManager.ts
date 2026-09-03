@@ -56,18 +56,36 @@ export class RoomManager {
 
   public async initFromRedis(engines: Record<string, IGameEngine<IGameState, IPlayerAction, IGameEvent>>) {
     const keys = await RedisStore.getKeys('room:*');
-    for (const key of keys) {
-      const dataStr = await RedisStore.get(key);
-      if (!dataStr) continue;
-      try {
-        const data = JSON.parse(dataStr, redisReviver);
-        const engine = engines[data.gameType];
-        if (!engine) continue;
+    // Read the raw snapshots concurrently and build rooms in bounded batches
+    // via Promise.allSettled, rather than one sequential `await` round-trip per
+    // room (10k rooms = 10k sequential Redis GETs today).
+    const BATCH_SIZE = 50;
+    const results: Array<{ key: string; data?: any }> = [];
+    for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+      const batch = keys.slice(i, i + BATCH_SIZE);
+      const settled = await Promise.allSettled(
+        batch.map(async (key) => {
+          const dataStr = await RedisStore.get(key);
+          return { key, dataStr };
+        })
+      );
+      settled.forEach((res, idx) => {
+        if (res.status === 'fulfilled' && res.value.dataStr) {
+          try {
+            results.push({ key: batch[idx]!, data: JSON.parse(res.value.dataStr, redisReviver) });
+          } catch (e) {
+            this.logger.log(`[RoomManager] Failed to parse room ${batch[idx]}: ${e}`);
+          }
+        }
+      });
+    }
 
-        // Restore the room from its persisted snapshot instead of rebuilding
-        // initial state (which would require real player IDs and reset progress).
-        // Hot-seat flags are persisted and restored so the owner keeps its
-        // "acts for any seat" capability across a server restart.
+    // Build all rooms in parallel; the constructor no longer writes the snapshot
+    // back (rehydrate path), so no redundant persistence round-trips occur here.
+    const built = await Promise.allSettled(
+      results.map(async ({ data }) => {
+        const engine = engines[data.gameType];
+        if (!engine) return null;
         const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, [], data.state, {
           isHotSeat: data.isHotSeat === true,
           ownerPlayerId: data.ownerPlayerId ?? null,
@@ -75,10 +93,16 @@ export class RoomManager {
         });
         room.loadState(data);
         room.setPubSub(this.pubsub);
-        this.rooms.set(room.id, room);
-        this.logger.log(`[RoomManager] Rehydrated room ${room.id} (${data.gameType}) from Redis`);
-      } catch (e) {
-        this.logger.log(`[RoomManager] Failed to parse room ${key}: ${e}`);
+        return room;
+      })
+    );
+
+    for (const res of built) {
+      if (res.status === 'fulfilled' && res.value) {
+        this.rooms.set(res.value.id, res.value);
+        this.logger.log(`[RoomManager] Rehydrated room ${res.value.id} (${res.value.gameType}) from Redis`);
+      } else if (res.status === 'rejected') {
+        this.logger.log(`[RoomManager] Failed to rehydrate room: ${res.reason}`);
       }
     }
   }
