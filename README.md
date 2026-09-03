@@ -110,7 +110,7 @@ flowchart TD
     ZodServer -->|Validates Payload| Room
     
     subgraph Game Engine
-        PureLogic[⚙️ Pure State Machine (Reducer)]
+        PureLogic[⚙️ Pure State Machine / Reducer]
     end
     
     Room -->|Passes Current State + Action| PureLogic
