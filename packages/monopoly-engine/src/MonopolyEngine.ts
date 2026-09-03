@@ -50,6 +50,29 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
   },
 
   reduce(currentState: Readonly<IMonopolyState>, action: Readonly<MonopolyAction>, rng: IRandomProvider): Result<IStateTransition<IMonopolyState, MonopolyEvent>, string> {
+    // Guards run against the read-only current state BEFORE cloning, so invalid or
+    // rejected actions never pay the cost of cloning players, ownership, buildings,
+    // decks, and the active trade.
+    let currentPlayer = currentState.players[currentState.currentPlayerIndex];
+    if (!currentPlayer) {
+      return { success: false, error: 'PLAYER_NOT_FOUND' };
+    }
+    if (action.type !== 'RESTART_GAME' && action.playerId !== currentPlayer.id) {
+      if ((action.type === 'ACCEPT_TRADE' || action.type === 'REJECT_TRADE') && currentState.activeTrade?.toPlayerId === action.playerId) {
+        // Allowed for the recipient of the trade
+      } else {
+        return { success: false, error: 'NOT_YOUR_TURN' }; // Invalid action
+      }
+    }
+
+    if (currentPlayer.debt) {
+      const allowedActions = ['SELL_HOUSE', 'MORTGAGE_PROPERTY', 'PROPOSE_TRADE', 'ACCEPT_TRADE', 'REJECT_TRADE', 'PAY_DEBT', 'DECLARE_BANKRUPTCY', 'RESTART_GAME'];
+      if (!allowedActions.includes(action.type)) {
+        return { success: false, error: 'MUST_RESOLVE_DEBT' };
+      }
+    }
+
+    // Guards passed - clone the state for mutation.
     const nextPlayers = currentState.players.map(p => ({
       ...p,
       getOutOfJailFreeCards: [...p.getOutOfJailFreeCards],
@@ -80,24 +103,9 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
 
     const events: MonopolyEvent[] = [];
 
-    const currentPlayer = nextState.players[nextState.currentPlayerIndex];
-    if (!currentPlayer) {
-      return { success: false, error: 'PLAYER_NOT_FOUND' };
-    }
-    if (action.type !== 'RESTART_GAME' && action.playerId !== currentPlayer.id) {
-      if ((action.type === 'ACCEPT_TRADE' || action.type === 'REJECT_TRADE') && nextState.activeTrade?.toPlayerId === action.playerId) {
-        // Allowed for the recipient of the trade
-      } else {
-        return { success: false, error: 'NOT_YOUR_TURN' }; // Invalid action
-      }
-    }
-
-    if (currentPlayer.debt) {
-      const allowedActions = ['SELL_HOUSE', 'MORTGAGE_PROPERTY', 'PROPOSE_TRADE', 'ACCEPT_TRADE', 'REJECT_TRADE', 'PAY_DEBT', 'DECLARE_BANKRUPTCY', 'RESTART_GAME'];
-      if (!allowedActions.includes(action.type)) {
-        return { success: false, error: 'MUST_RESOLVE_DEBT' };
-      }
-    }
+    // Re-resolve the active player against the cloned players so the action's
+    // mutations are applied to the mutable clone, not the read-only original.
+    currentPlayer = nextState.players[nextState.currentPlayerIndex]!;
 
     switch (action.type) {
       case 'ROLL_DICE': {

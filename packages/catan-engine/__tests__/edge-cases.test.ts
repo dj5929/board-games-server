@@ -464,13 +464,13 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
     let state = initMainTurn([playerId('p1'), playerId('p2'), playerId('p3')], rng);
     (state as any).players[0].resources = { WOOD: 10, BRICK: 10, SHEEP: 10, WHEAT: 10, ORE: 10 };
 
-    // Give p1 five cities = 10 points -> finishing on the roll
+    // Give p1 five cities = 10 points -> finishing on a VP-affecting action
     const vIds = Object.keys(state.board.vertices).slice(0, 5);
     vIds.forEach(vId => {
       (state as any).board.vertices[vId] = { ...state.board.vertices[vId], owner: playerId('p1'), building: 'CITY' };
     });
 
-    let res = CatanEngine.reduce(state, { type: 'ROLL_DICE', playerId: playerId('p1') }, rng);
+    let res = CatanEngine.reduce(state, { type: 'BUY_DEV_CARD', playerId: playerId('p1') }, rng);
     expect(res.success).toBe(true);
     if (!res.success) return;
     expect(res.data.nextState.status).toBe('FINISHED');
@@ -478,7 +478,7 @@ describe('CatanEngine - Edge Cases & Phase E Features', () => {
     // A further action must not re-award long road / largest army
     const finished = res.data.nextState;
     (finished as any).longestRoadOwner = playerId('p2');
-    res = CatanEngine.reduce(finished, { type: 'END_TURN', playerId: playerId('p1') }, rng);
+    res = CatanEngine.reduce(finished, { type: 'BUY_DEV_CARD', playerId: playerId('p1') }, rng);
     expect(res.success).toBe(true);
     if (!res.success) return;
     expect(res.data.nextState.longestRoadOwner).toBe(playerId('p2'));

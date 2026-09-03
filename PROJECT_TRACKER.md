@@ -288,10 +288,10 @@ A codebase-wide performance review was completed. The following high-level optim
 - 🟢 **Remove redundant rehydration write (Batch 3, `Room.ts`):** The rehydrate path no longer writes the exact snapshot it just read back to the store — the constructor skips `saveState()` when given a persisted `initialState` (`isRehydrated`).
 - 🟢 **Defer rehydration off the critical startup path (Batch 3, `server.ts`):** `start()` now listens first, then kicks off `roomManager.initFromRedis` in the background (guarded with a `.catch`), so time-to-serve is immediate and persisted rooms become joinable as they restore.
 
-### Engine: reduce recomputation
-- 🔄 **Incremental Catan awards (`CatanEngine.ts`:88-159):** `checkWinConditionAndAwards` runs the global longest-road DFS + VP recount + largest-army recount on **every action** (21 call sites), including `TRADE_BANK`/`DISCARD_RESOURCES` that cannot affect roads. Gate it to board-mutating/building/dev-card actions, or track road/army/VP totals incrementally in state.
-- 🔄 **Lazy board cloning (Catan):** `reduce` clones the entire board (19 hexes + 54 vertices + 72 edges) on every action (`CatanEngine.ts`:233-237) even for non-board actions. Use structural sharing / clone-on-mutate.
-- 🔄 **Monopoly guard-before-clone (`MonopolyEngine.ts`:53-72):** Full state is cloned before early-returning guard failures. Clone only after guards pass; precompute static `BOARD_SPACES.filter(colorGroup)` lookups once.
+### Engine: reduce recomputation (Batch 4)
+- 🟢 **Gate `checkWinConditionAndAwards` to VP-affecting actions (`CatanEngine.ts`):** The global longest-road DFS + VP recount + largest-army recount (previously 21 call sites) now only runs on the 10 actions that can change victory points / roads / armies: `PLACE_INITIAL_SETTLEMENT`, `PLACE_INITIAL_ROAD`, `BUILD_SETTLEMENT`, `BUILD_ROAD`, `UPGRADE_CITY`, `BUY_DEV_CARD`, `PLAY_KNIGHT`, `PLAY_ROAD_BUILDING`, `END_TURN`, `FORCE_END_TURN`. Pure-resource / trade / discard / robber actions (`ROLL_DICE`, `DISCARD_RESOURCES`, `MOVE_ROBBER`, `TRADE_BANK`, `PROPOSE_TRADE`, `ACCEPT_TRADE`, `REJECT_TRADE`, `PLAY_YEAR_OF_PLENTY`, `PLAY_MONOPOLY`, `CANCEL_TRADE`) skip the recompute entirely — they cannot change VP/road/army. Game-over is detected on the action that actually reaches 10 VP.
+- 🟢 **Lazy board cloning (`CatanEngine.ts`):** `reduce` no longer clones the whole board (19 hexes + 54 vertices + 72 edges) on every action. The board starts as the shared read-only original and `ensureBoard()` materializes a shallow clone only on the 8 board-mutating actions (initial settlement/road, build settlement/road, upgrade city, move robber, play knight, road-building), then swaps the reference held by `nextState.board` (clone-on-mutate / structural sharing).
+- 🟢 **Monopoly guard-before-clone (`MonopolyEngine.ts`):** `reduce` previously cloned the entire state (players, ownership, buildings, decks, active trade) before running the turn/debt guards — so every rejected action still paid the clone cost. Guards (player-not-found / not-your-turn / must-resolve-debt) now run against the read-only `currentState` first, and the state is cloned only after they pass; `currentPlayer` is re-resolved from the cloned players so mutations still hit the mutable copy.
 
 ### UI: bundle & code splitting
 - ✅ **DONE (Batch 1)** — `React.lazy` + `Suspense` in `App.tsx` (lines 1-5): all three game rooms (Monopoly, Catan, Scotland Yard) now lazy-load as separate chunks; users only download the game they choose (~60-70% initial-bundle cut).
@@ -311,7 +311,7 @@ A codebase-wide performance review was completed. The following high-level optim
 2. ✅ **DONE (Batch 2)** — Deduplicate serialization: one payload serialization per dispatch reused across per-player broadcast + pubsub, with a dirty/coalescing flag on `saveState` (and skipped redundant constructor write on rehydrate).
 3. ✅ **DONE (Batch 3)** — Rehydration: `SCAN` + parallelize in batches + skip redundant constructor write + defer off critical startup path.
 4. ✅ **DONE (Batch 1)** — Memoize the three boards + derived data and cut per-render scans.
-5. Gate `checkWinConditionAndAwards` to board-mutating actions (Batch 4).
+5. ✅ **DONE (Batch 4)** — Engine recomputation: gate Catan `checkWinConditionAndAwards` to VP-affecting actions, lazy Catan board clone-on-mutate, and Monopoly guard-before-clone.
 
 ---
 

@@ -222,7 +222,10 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
     const activePlayerIndex = currentState.players.findIndex(p => p.id === currentState.activePlayerId);
     if (activePlayerIndex === -1) return { success: false, error: 'Invalid active player' };
     
-    // Deep clone players and board for mutations
+    // Clone players (mutable) for mutations. The board is cloned lazily on first
+    // mutation (clone-on-mutate / structural sharing): pure-resource, trade and
+    // discard actions never materialize the 19-hex / 54-vertex / 72-edge board,
+    // so the shallow board clone is fully skipped for them.
     const nextPlayers = currentState.players.map(p => ({ 
       ...p, 
       resources: { ...p.resources },
@@ -230,19 +233,32 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
       playedDevelopmentCards: [...p.playedDevelopmentCards]
     }));
     const activePlayer = nextPlayers[activePlayerIndex]!;
-    const nextBoard = { 
-      hexes: [...currentState.board.hexes], 
-      vertices: { ...currentState.board.vertices }, 
-      edges: { ...currentState.board.edges } 
-    };
 
+    // `nextBoard` starts as the (read-only, shared) original board. Board actions
+    // call `ensureBoard()` before their first write, which materializes a shallow
+    // clone and swaps the reference held by `nextState.board`.
     const nextState: MutableCatanState = {
       ...currentState,
       players: nextPlayers,
-      board: nextBoard,
+      board: currentState.board as unknown as MutableCatanState['board'],
       pendingDiscards: { ...currentState.pendingDiscards },
       devCardDeck: [...currentState.devCardDeck],
       activeTrade: currentState.activeTrade ? { ...currentState.activeTrade } : null
+    };
+    let nextBoard: MutableCatanState['board'] = currentState.board as unknown as MutableCatanState['board'];
+    let boardMaterialized = false;
+    const ensureBoard = (): MutableCatanState['board'] => {
+      if (!boardMaterialized) {
+        const cloned: MutableCatanState['board'] = {
+          hexes: [...currentState.board.hexes],
+          vertices: { ...currentState.board.vertices },
+          edges: { ...currentState.board.edges }
+        };
+        nextBoard = cloned;
+        nextState.board = cloned;
+        boardMaterialized = true;
+      }
+      return nextBoard;
     };
 
     const events: ICatanEvent[] = [];
@@ -313,7 +329,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           });
         }
 
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -336,7 +351,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           }
         }
 
-        nextBoard.vertices[vertexId] = { ...vertex, owner: action.playerId, building: 'SETTLEMENT' };
+        ensureBoard().vertices[vertexId] = { ...vertex, owner: action.playerId, building: 'SETTLEMENT' };
         nextState.placementStep = 'ROAD';
         nextState.pendingRoadVertex = vertexId;
 
@@ -363,7 +378,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           return { success: false, error: 'Road must connect to your settlement' };
         }
 
-        nextBoard.edges[edgeId] = { ...edge, owner: action.playerId };
+        ensureBoard().edges[edgeId] = { ...edge, owner: action.playerId };
 
         const order = [...currentState.placementOrder];
         const nextIndex = currentState.placementIndex + 1;
@@ -423,7 +438,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
           nextState.turnPhase = 'ROBBER_PLACEMENT';
         }
         
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -438,11 +452,11 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         // Remove from old hex
         const oldHexIndex = nextBoard.hexes.findIndex(h => h.hasRobber);
         if (oldHexIndex !== -1) {
-          nextBoard.hexes[oldHexIndex] = { ...nextBoard.hexes[oldHexIndex]!, hasRobber: false };
+          ensureBoard().hexes[oldHexIndex] = { ...nextBoard.hexes[oldHexIndex]!, hasRobber: false };
         }
         
         // Place on new hex
-        nextBoard.hexes[targetHexIndex] = { ...nextBoard.hexes[targetHexIndex]!, hasRobber: true };
+        ensureBoard().hexes[targetHexIndex] = { ...nextBoard.hexes[targetHexIndex]!, hasRobber: true };
         
         events.push({ type: 'ROBBER_MOVED', playerId: action.playerId, hexId: action.hexId });
 
@@ -475,7 +489,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         }
         
         nextState.turnPhase = 'MAIN_TURN';
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
       
@@ -518,7 +531,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources.SHEEP -= 1;
         activePlayer.resources.WHEAT -= 1;
         
-        nextBoard.vertices[vertexId] = { ...vertex, owner: action.playerId, building: 'SETTLEMENT' };
+        ensureBoard().vertices[vertexId] = { ...vertex, owner: action.playerId, building: 'SETTLEMENT' };
 
         events.push({ type: 'SETTLEMENT_BUILT', playerId: action.playerId, vertexId });
         checkWinConditionAndAwards(nextState, events);
@@ -553,7 +566,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources.WOOD -= 1;
         activePlayer.resources.BRICK -= 1;
         
-        nextBoard.edges[edgeId] = { ...edge, owner: action.playerId };
+        ensureBoard().edges[edgeId] = { ...edge, owner: action.playerId };
         
         events.push({ type: 'ROAD_BUILT', playerId: action.playerId, edgeId });
         checkWinConditionAndAwards(nextState, events);
@@ -583,7 +596,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources.ORE -= 3;
         activePlayer.resources.WHEAT -= 2;
         
-        nextBoard.vertices[vertexId] = { ...vertex, building: 'CITY' };
+        ensureBoard().vertices[vertexId] = { ...vertex, building: 'CITY' };
 
         events.push({ type: 'CITY_UPGRADED', playerId: action.playerId, vertexId });
         checkWinConditionAndAwards(nextState, events);
@@ -627,7 +640,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources[requestResource as keyof typeof activePlayer.resources] += amount;
         
         events.push({ type: 'BANK_TRADE', playerId: action.playerId, offerResource, requestResource, amount, cost: totalCost });
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -651,7 +663,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         };
         
         events.push({ type: 'TRADE_PROPOSED', trade: nextState.activeTrade });
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -686,7 +697,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         const tradeId = trade.id;
         nextState.activeTrade = null;
         events.push({ type: 'TRADE_ACCEPTED', tradeId });
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -697,7 +707,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         const tradeId = currentState.activeTrade.id;
         nextState.activeTrade = null;
         events.push({ type: 'TRADE_REJECTED', tradeId });
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -748,10 +757,10 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         // Remove old robber
         const oldHexIndex = nextBoard.hexes.findIndex(h => h.hasRobber);
         if (oldHexIndex !== -1) {
-          nextBoard.hexes[oldHexIndex] = { ...nextBoard.hexes[oldHexIndex]!, hasRobber: false };
+          ensureBoard().hexes[oldHexIndex] = { ...nextBoard.hexes[oldHexIndex]!, hasRobber: false };
         }
 
-        nextBoard.hexes[targetHexIndex] = { ...nextBoard.hexes[targetHexIndex]!, hasRobber: true };
+        ensureBoard().hexes[targetHexIndex] = { ...nextBoard.hexes[targetHexIndex]!, hasRobber: true };
         
         events.push({ type: 'ROBBER_MOVED', playerId: action.playerId, hexId: action.hexId });
 
@@ -800,7 +809,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources[action.resource2] += 1;
 
         events.push({ type: 'DEV_CARD_PLAYED', playerId: action.playerId, cardType: 'YEAR_OF_PLENTY' });
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -828,7 +836,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         activePlayer.resources[action.resource] += stolenCount;
 
         events.push({ type: 'DEV_CARD_PLAYED', playerId: action.playerId, cardType: 'MONOPOLY' });
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 
@@ -880,7 +887,7 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         nextState.playedDevCardThisTurn = true;
         
         for (const edgeId of edges) {
-          nextBoard.edges[edgeId] = { ...nextBoard.edges[edgeId]!, owner: action.playerId };
+          ensureBoard().edges[edgeId] = { ...nextBoard.edges[edgeId]!, owner: action.playerId };
           events.push({ type: 'ROAD_BUILT', playerId: action.playerId, edgeId });
         }
         
@@ -896,7 +903,6 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         const tradeId = currentState.activeTrade.id;
         nextState.activeTrade = null;
         events.push({ type: 'TRADE_CANCELLED', tradeId });
-        checkWinConditionAndAwards(nextState, events);
         return { success: true, data: { nextState, events } };
       }
 

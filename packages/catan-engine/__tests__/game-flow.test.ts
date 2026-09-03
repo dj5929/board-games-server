@@ -96,8 +96,10 @@ describe('CatanEngine - Base Game Flow', () => {
     vIds.forEach(vId => {
       (state as any).board.vertices[vId] = { ...state.board.vertices[vId], owner: p1, building: 'CITY' };
     });
+    // Resources to run a VP-affecting action, which re-checks the win condition
+    (state as any).players[0].resources = { WOOD: 0, BRICK: 0, SHEEP: 1, WHEAT: 1, ORE: 1 };
 
-    const res = CatanEngine.reduce(state, { type: 'ROLL_DICE', playerId: p1 }, rng);
+    const res = CatanEngine.reduce(state, { type: 'BUY_DEV_CARD', playerId: p1 }, rng);
     expect(res.success).toBe(true);
     if (!res.success) return;
     expect(res.data.nextState.status).toBe('FINISHED');
