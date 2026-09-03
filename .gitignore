@@ -4,6 +4,7 @@ coverage/
 *.log
 .env
 *.tsbuildinfo
+dump.rdb
 packages/*/src/*.js
 packages/*/src/*.js.map
 packages/*/src/*.d.ts

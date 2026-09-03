@@ -1,6 +1,8 @@
 # Universal Multiplayer Board Game Platform (Agent Rules)
 
 **Current Focus:** Performance & Load Optimization (Phase 34) — Batch 1 (UI code-splitting, Vite `manualChunks`, board memoization, `Dice3D` CSS extraction) completed; Batches 2–4 (server serialization dedup, Redis rehydration, engine incremental recomputation) remaining. Prior phases complete: 32 Containerization (incl. an automated git-push-triggered VPS deploy via `.github/workflows/deploy.yml` — see README "Production Deployment" / PROJECT_TRACKER Phase 32), 33 Turn Timer / AFK Management, 31 Redis persistence & server hardening.
+**Local dev:** The server reads Redis if available (`REDIS_URL`) but also runs without it (single-instance, in-memory). For dev with persistence, start `docker run -d --name redis -p 6379:6379 redis:alpine` before `npm run dev`. Ignore `dump.rdb` (Redis RDB artifact).
+**Automated UI testing:** `puppeteer-core` (root dev dep) is used to drive a real Chrome via CDP for end-to-end browser tests against a running stack (`:5173` client + `:3000` server). See the `ui-testing` skill. Full 2-player local Monopoly game to Game Over has been automated and passes (see PROJECT_TRACKER Phase 34 Batch 1).
 **Tracker:** See [PROJECT_TRACKER.md](./PROJECT_TRACKER.md) for roadmap and status.
 **Fixes:** See [FIXES.md](./FIXES.md) for identified issues, planned improvements, and implementation diffs.
 **Audits:** The consolidated security & systems audit is [FINAL_AUDIT.md](./FINAL_AUDIT.md). All 18 findings cataloged across the codebase have now been verified and fully fixed in Phase 31.
