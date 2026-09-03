@@ -5,7 +5,6 @@
 **Automated UI testing:** `puppeteer-core` (root dev dep) is used to drive a real Chrome via CDP for end-to-end browser tests against a running stack (`:5173` client + `:3000` server). See the `ui-testing` skill. Full 2-player local Monopoly game to Game Over has been automated and passes (see PROJECT_TRACKER Phase 34 Batch 1).
 **Tracker:** See [PROJECT_TRACKER.md](./PROJECT_TRACKER.md) for roadmap and status.
 **Fixes:** See [FIXES.md](./FIXES.md) for identified issues, planned improvements, and implementation diffs.
-**Audits:** The consolidated security & systems audit is [FINAL_AUDIT.md](./FINAL_AUDIT.md). All 18 findings cataloged across the codebase have now been verified and fully fixed in Phase 31.
 **Coverage:** See [COVERAGE.md](./COVERAGE.md) for the test coverage matrix of all components. Regenerate with `npm run test:cov`.
 
 ## Agent Rules & Guidelines

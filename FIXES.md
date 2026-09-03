@@ -142,7 +142,7 @@ This document tracks identified bugs, type safety issues, and planned improvemen
 
 ### 18. Security & Integrity Hardening (Final Audit Findings)
 - **Location:** `packages/server/src/server.ts`, `packages/server/src/Room.ts`, `packages/server/src/RoomManager.ts`, `packages/server/src/schemas.ts`, `packages/{catan,monopoly,scotland-yard}-engine/src/*Engine.ts`, `packages/catan-engine/src/types.ts`
-- **Issue:** The `FINAL_AUDIT.md` findings (CRITICAL-1/2/3/4/5, MED-1/4/6/7/8, LOW-1, LOW-10) were open.
+- **Issue:** The Final Audit findings (CRITICAL-1/2/3/4/5, MED-1/4/6/7/8, LOW-1, LOW-10) were open.
 - **Fix:**
   1. **CRITICAL-1 (player impersonation):** The WebSocket handler now forces `action.playerId = <authenticated socket playerId>` before dispatch, ignoring any client-supplied value.
   2. **CRITICAL-2/3 (hidden-information leak):** Added `getStateForPlayer` to `CatanEngine` and `MonopolyEngine`. Catan hides opponents' dev-card details and the ordered dev deck. Monopoly hides the ordered chance/chest decks (count only). `Room.broadcastState` already projects per-connection via `getStateForPlayer` (Scotland Yard had it; the others now do too).
@@ -540,7 +540,7 @@ isValidAction(currentState, action): boolean {
 
 ## 📝 Proposed Fixes for Final Audit Findings
 
-The following fixes address the verified open issues outlined in `FINAL_AUDIT.md`.
+The following fixes address the verified open security & integrity issues in the engines and server.
 **Update (Security & Integrity Hardening pass):** most findings below are now implemented — see Completed Fix #18 above. Items still marked **NOT YET DONE** remain open.
 
 ### 🔴 CRITICAL: Player Impersonation (CRITICAL-1)

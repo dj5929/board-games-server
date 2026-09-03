@@ -226,7 +226,7 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Network Resilience & Capacity (MED-2):** Added `@fastify/rate-limit` for HTTP routes to prevent room spam. Implemented a Token-Bucket Rate Limiter natively on WebSocket connections, dropping bursts above 20 tokens (10/sec refill) and returning `ACTION_REJECTED`.
 - 🟢 **Connection Lifecycle (MED-5, MED-9):** Added Ping/Pong heartbeats to safely detect dropped TCP connections. Unredeemed session tokens now expire after a 5-minute TTL. Actively disconnected players will automatically trigger a generic `FORFEIT` / `END_TURN` after a 5-minute timeout.
 - 🟢 **Performance & RNG Tweaks (LOW-2, 4, 5, 6):** Upgraded `CryptoRandomProvider.next()` to produce cryptographically secure 32-bit floats. Replaced all collision-prone `Math.random` UI toast/event IDs across the React client with `crypto.randomUUID()`. Precomputed a constant-time `BOARD_SPACES_MAP` to optimize Monopoly's space lookups.
-- 🟢 **Security Audit Fixes:** Validated and successfully patched all 18 security/systems findings listed in `FINAL_AUDIT.md` across Catan, Monopoly, and Scotland Yard engines.
+- 🟢 **Security Audit Fixes:** Validated and successfully patched all 18 security/systems audit findings across Catan, Monopoly, and Scotland Yard engines.
 
 ---
 
@@ -243,7 +243,7 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Persistence `Infinity` Bug Fixed (found in container test):** `JSON.stringify` converts Monopoly's `bankMoney: Infinity` to `null`, so persisted rooms came back with a broken bank. Added `redisReplacer`/`redisReviver` (tagged-`Infinity` streaming) in `RedisStore.ts`; verified the snapshot stores `"__JSON_INFINITY__"` and rehydration restores the real value.
 - 🟢 **Client Build Fix (pre-existing bug):** The production `web-client` build was failing because `EventLogEntry`/`Toast.id` were typed `number` while Phase 31 replaced `Math.random` with `crypto.randomUUID()` (string). Updated the types to `string` in `GameRoom.tsx` / `CatanRoom.tsx` so `tsc -b` passes again.
 - 🟢 **Redis Pub/Sub Adapter:** Added `PubSubManager.ts` — a Redis Pub/Sub adapter enabling scalable WebSocket room broadcasting across multiple server instances. The `RedisStore` now exposes `duplicateClient()` for a dedicated subscriber connection. `Room` publishes `{state, events}` to its per-room Redis channel after every reduce() and delivers remote messages to local connections with per-player projection (re-projected via `getStateForPlayer`, preserving hidden-information guarantees). Subscription lifecycle follows the local connection count: the first local connection subscribes to the room channel, the last removes the subscription. In single-instance mode (no `REDIS_URL`) it remains a no-op so behavior is unchanged. Cross-instance delivery verified with `ioredis-mock` (2-instance publish→deliver, channel isolation, unsubscribe) plus Room-level subscription-lifecycle/remote-delivery/publish tests. Full suite green (297 tests), typecheck, root lint, and server build all pass.
-- 🟢 **Security & Systems Audit:** All open findings from `FINAL_AUDIT.md` have been fully resolved in Phase 31.
+- 🟢 **Security & Systems Audit:** All open findings from the final audit have been fully resolved in Phase 31.
 
 ---
 
@@ -279,8 +279,8 @@ A codebase-wide performance review was completed. The following high-level optim
   - **Full 2-player local game to completion:** Autonomously drove every turn of a Hot-Seat Monopoly game (Roll Dice → conditionally Buy / Pay Debt / Pay Jail Fine / Use Jail Card / Bankrupt → End Turn) for 52 turn-advances (~137 UI cycles) until **Game Over**. p2 won by bankrupting p1 (p1 landed on p2's Kentucky Ave, hit $0, and used the Bankrupt action). Verified correct turn order, doubles granting extra rolls, Chance/Community-Chest modals, conditional button enable/disable, and the debt→bankruptcy win path. **Zero console/page errors across the entire run.**
 
 ### Server: serialization & broadcast hot-path
-- 🔄 **Deduplicate `JSON.stringify` per action (`Room.ts`:225-243, 278-303):** A single successful `dispatch()` currently serializes the entire game state 6–8 times — once for `saveState()` to Redis (`Room.ts:87`), once per connected player in `broadcastState()` (`Room.ts:285`), plus the raw state again in `pubsub.publish()` (`Room.ts:289`). Plan: serialize once, project only the per-player sentinel/hidden field, and reuse a single JSON string across save + per-player broadcast + pubsub.
-- 🔄 **Debounce / dirty-flag `saveState()` (`Room.ts`:73-88):** No batching exists — every `dispatch`, token issue, and connection event triggers a full state `JSON.stringify` + Redis SET. On room creation (`server.ts:73-81`) the constructor `saveState()` + `issueSessionToken()` cause 2 redundant back-to-back full writes. Plan: mark dirty and coalesce writes; batch token issuance into the first write.
+- 🟢 **Deduplicate `JSON.stringify` per action (Batch 2, `Room.ts`):** `broadcastState()`/`broadcastRemoteState()` no longer serialize once per connected connection for non-projection games (Monopoly, 2–8 players). For games without `getStateForPlayer`, the full state is identical for every player, so the whole `STATE_UPDATE` payload is serialized **once per dispatch and the same string is reused for all connections** (was N serializations). Hidden-info games (Catan / Scotland Yard) still re-project per player, but the pubsub publish also reuses the raw state object rather than re-serializing. Verified: existing broadcast/order tests unchanged.
+- 🟢 **Debounce / dirty-flag `saveState()` (Batch 2, `Room.ts`):** `saveState()` now writes the snapshot immediately on the first call in a scheduling tick (preserving write-ordering so a later rehydration read observes it) and coalesces any further calls within the same microtask turn into a single trailing flush — collapsing bursts (room creation constructor write + token issuance, multiple connection events) into one final Redis write instead of many back-to-back serialized writes. On the rehydrate path the constructor's redundant "write-back-what-we-just-read" is skipped entirely (`isRehydrated`).
 
 ### Server: boot rehydration
 - 🔄 **Replace Redis `KEYS` with `SCAN` (`RedisStore.ts`:58-64):** `redis.keys('room:*')` is O(N) over the entire Redis keyspace and blocks the server. Use `SCAN` for incremental iteration.
@@ -308,8 +308,8 @@ A codebase-wide performance review was completed. The following high-level optim
 
 ### Recommended implementation order (lowest risk → highest reward)
 1. ✅ **DONE (Batch 1)** — `React.lazy` + `Suspense` + Vite `manualChunks` + board memoization + `Dice3D` CSS extraction.
-2. Deduplicate serialization: one `JSON.stringify` per action reused for save + per-player broadcast, with a dirty/debounce flag on `saveState` (Batch 2).
-3. Rehydration: `SCAN` + parallelize + remove redundant constructor write (Batch 3).
+2. ✅ **DONE (Batch 2)** — Deduplicate serialization: one payload serialization per dispatch reused across per-player broadcast + pubsub, with a dirty/coalescing flag on `saveState` (and skipped redundant constructor write on rehydrate).
+3. Rehydration: `SCAN` + parallelize + remove redundant constructor write + defer off critical startup path (Batch 3).
 4. ✅ **DONE (Batch 1)** — Memoize the three boards + derived data and cut per-render scans.
 5. Gate `checkWinConditionAndAwards` to board-mutating actions (Batch 4).
 

@@ -26,6 +26,12 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   private connections: Map<string, IClientConnection> = new Map();
   private pubsub: PubSubManager | null = null;
   private turnTimer: ReturnType<typeof setInterval> | null = null;
+  // Dirty-flag persistence: back-to-back saveState() calls (constructor write +
+  // token issuance, connection events, every dispatch's state write) coalesce
+  // into a single Redis write per microtask turn instead of N serialized writes.
+  private dirty = false;
+  private saveScheduled = false;
+  private isRehydrated = false;
   public turnStartedAt: number;
   public readonly turnTimeLimitMs: number;
   public sessionTokens: Map<string, string> = new Map();
@@ -50,7 +56,13 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     this.turnTimeLimitMs = options.turnTimeLimitMs ?? 0;
     this.isHotSeat = options.isHotSeat ?? false;
     this.ownerPlayerId = options.ownerPlayerId ?? null;
-    this.saveState();
+    this.isRehydrated = !!initialState;
+    // Skip the redundant persistence write on the rehydrate path: loadState()
+    // has just read this exact snapshot from the store, so writing it straight
+    // back is wasted work. Fresh rooms do persist their initial snapshot.
+    if (!this.isRehydrated) {
+      this.saveState();
+    }
   }
 
   /** True when the given id corresponds to a seat in this room's game state. */
@@ -70,7 +82,34 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     }
   }
 
-  public async saveState() {
+  /**
+   * Persist the room's current snapshot. The first call in a scheduling tick
+   * writes immediately (preserving ordering so a subsequent rehydration read
+   * observes the write), while any further calls within the same tick are
+   * coalesced into a single microtask flush — collapsing bursts (e.g. a room
+   * creation whose constructor save is quickly followed by token issuance,
+   * or several connection events) into one final Redis write.
+   */
+  public saveState() {
+    if (this.saveScheduled) {
+      // A write already happened this tick; fold the latest mutations into the
+      // pending microtask flush instead of issuing another serialization.
+      this.dirty = true;
+      return;
+    }
+    this.saveScheduled = true;
+    this.dirty = false;
+    this.writeSnapshot();
+    queueMicrotask(() => {
+      this.saveScheduled = false;
+      if (this.dirty) {
+        this.dirty = false;
+        this.writeSnapshot();
+      }
+    });
+  }
+
+  private writeSnapshot() {
     const data = {
       id: this.id,
       gameType: this.gameType,
@@ -84,7 +123,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       disconnectedAt: Array.from(this.disconnectedAt.entries()),
       lastActivity: this.lastActivity
     };
-    await RedisStore.set(`room:${this.id}`, JSON.stringify(data, redisReplacer));
+    void RedisStore.set(`room:${this.id}`, JSON.stringify(data, redisReplacer));
   }
 
   // Restore state from Redis (used by RoomManager)
@@ -278,12 +317,18 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   private broadcastState() {
     const hasProjection = typeof this.engine.getStateForPlayer === 'function';
     const timer = this.timerMeta();
-    for (const [pid, conn] of this.connections.entries()) {
-      const stateForPlayer = hasProjection
-        ? this.engine.getStateForPlayer!(this.state, playerId(pid))
-        : this.state;
-      const payload = JSON.stringify({ type: 'STATE_UPDATE', state: stateForPlayer, timer });
-      conn.send(payload);
+    if (!hasProjection) {
+      // No hidden info: the full state is identical for every player, so
+      // serialize ONCE and reuse the same payload string for all connections.
+      const payload = JSON.stringify({ type: 'STATE_UPDATE', state: this.state, timer });
+      for (const conn of this.connections.values()) {
+        conn.send(payload);
+      }
+    } else {
+      for (const [pid, conn] of this.connections.entries()) {
+        const stateForPlayer = this.engine.getStateForPlayer!(this.state, playerId(pid));
+        conn.send(JSON.stringify({ type: 'STATE_UPDATE', state: stateForPlayer, timer }));
+      }
     }
     if (this.pubsub) {
       this.pubsub.publish(this.id, { state: this.state, timer });
@@ -293,12 +338,18 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   private broadcastRemoteState(timer?: unknown) {
     const hasProjection = typeof this.engine.getStateForPlayer === 'function';
     const t = timer ?? this.timerMeta();
-    for (const [pid, conn] of this.connections.entries()) {
-      const stateForPlayer = hasProjection
-        ? this.engine.getStateForPlayer!(this.state, playerId(pid))
-        : this.state;
-      const payload = JSON.stringify({ type: 'STATE_UPDATE', state: stateForPlayer, timer: t });
-      conn.send(payload);
+    if (!hasProjection) {
+      const payload = JSON.stringify({ type: 'STATE_UPDATE', state: this.state, timer: t });
+      for (const conn of this.connections.values()) {
+        conn.send(payload);
+      }
+    } else {
+      for (const [pid, conn] of this.connections.entries()) {
+        const stateForPlayer = hasProjection
+          ? this.engine.getStateForPlayer!(this.state, playerId(pid))
+          : this.state;
+        conn.send(JSON.stringify({ type: 'STATE_UPDATE', state: stateForPlayer, timer: t }));
+      }
     }
   }
 

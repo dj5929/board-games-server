@@ -2,7 +2,7 @@
 
 > **Audience:** developers working on this repository. This document is the *nitty-gritty* companion to the high-level [README](../README.md). It describes, system-by-system, exactly how the platform is built: the pure game engines, the Fastify + WebSocket server, the React web client, the hidden-information rules, persistence/crash-recovery, and containerization.
 >
-> **Companion docs:** [FIXES.md](../FIXES.md) — identified bugs & implementation diffs · [COVERAGE.md](../COVERAGE.md) — test coverage matrix · [PROJECT_TRACKER.md](../PROJECT_TRACKER.md) — phase roadmap · [FINAL_AUDIT.md](../FINAL_AUDIT.md) — consolidated security audit (all findings resolved in Phase 31).
+> **Companion docs:** [FIXES.md](../FIXES.md) — identified bugs & implementation diffs · [COVERAGE.md](../COVERAGE.md) — test coverage matrix · [PROJECT_TRACKER.md](../PROJECT_TRACKER.md) — phase roadmap.
 
 ---
 
@@ -57,7 +57,7 @@ packages/
 └── web-client/             # React + Vite + Tailwind frontend
 .github/workflows/ci.yml    # typecheck + lint + full test suite + production builds
 Dockerfile / docker-compose.yml (.env.example, .dockerignore)
-README.md, PROJECT_TRACKER.md, FIXES.md, COVERAGE.md, FINAL_AUDIT.md
+README.md, PROJECT_TRACKER.md, FIXES.md, COVERAGE.md
 ```
 
 ---

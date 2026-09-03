@@ -233,7 +233,6 @@ The compose stack serves plain HTTP (`:3000` server, `:5173` client). For produc
 ## 🧭 Engineering Docs
 
 - **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** — Full architecture deep-dive: engine contracts, per-game engine rules, server internals (rooms/sessions/Redis/rehydration), WebSocket protocol, client UI/animation pipeline, hidden-information enforcement, containerization, and known limitations.
-- **[FINAL_AUDIT.md](./FINAL_AUDIT.md)** — Consolidated security & systems audit. Cross-references [AUDIT_REPORT.md](./AUDIT_REPORT.md), [DEEP_AUDIT_REPORT.md](./DEEP_AUDIT_REPORT.md), and [SECURITY_AUDIT_REPORT.md](./SECURITY_AUDIT_REPORT.md). *Note: Phase 31 has fully resolved the open findings in this audit.*
 - **[FIXES.md](./FIXES.md)** — Identified bugs, planned improvements, and implementation diffs.
 - **[COVERAGE.md](./COVERAGE.md)** — Test coverage matrix for all components.
 - **[PROJECT_TRACKER.md](./PROJECT_TRACKER.md)** — High-level roadmap, phase-by-phase implementation status, and completion state.
