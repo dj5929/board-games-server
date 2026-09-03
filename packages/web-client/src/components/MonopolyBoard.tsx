@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import type { IMonopolyState } from '@packages/monopoly-engine';
 import { BOARD_SPACES } from '@packages/monopoly-engine';
 import { PlayerToken } from './PlayerToken';
@@ -54,29 +54,74 @@ const PROPERTY_COLORS: Record<string, string> = {
 
 const PLAYER_COLORS = ['bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500'];
 
-// Helper to determine Grid Column and Row for each of the 40 spaces
-// Grid is 11x11, coordinates are 1-indexed for CSS Grid.
-// Bottom Row: col 11 to 1, row 11
-// Left Col: col 1, row 11 to 1
-// Top Row: col 1 to 11, row 1
-// Right Col: col 11, row 1 to 11
 function getGridPosition(index: number): { gridColumn: number, gridRow: number } {
   if (index >= 0 && index <= 10) {
-    // Bottom row (Right to Left)
     return { gridColumn: 11 - index, gridRow: 11 };
   } else if (index > 10 && index <= 20) {
-    // Left column (Bottom to Top)
     return { gridColumn: 1, gridRow: 11 - (index - 10) };
   } else if (index > 20 && index <= 30) {
-    // Top row (Left to Right)
     return { gridColumn: 1 + (index - 20), gridRow: 1 };
   } else {
-    // Right column (Top to Bottom)
     return { gridColumn: 11, gridRow: 1 + (index - 30) };
   }
 }
 
-export function MonopolyBoard({ state, children }: Props) {
+const BoardSpaces = memo(function BoardSpaces({ ownership, players }: { ownership: IMonopolyState['ownership']; players: IMonopolyState['players'] }) {
+  return (
+    <>
+      {BOARD_SPACES.map((space, index) => {
+        const { gridColumn, gridRow } = getGridPosition(index);
+        const colorClass = PROPERTY_COLORS[space.id];
+        const ownerId = ownership[space.id];
+        const ownerIndex = players.findIndex(p => p.id === ownerId);
+        const ownerColor = ownerIndex !== -1 ? PLAYER_COLORS[ownerIndex % PLAYER_COLORS.length] : null;
+
+        const isCorner = index % 10 === 0;
+
+        let barClasses = "";
+        let flexDir = "flex-col";
+        if (index >= 0 && index < 10) {
+          barClasses = "w-full h-1/4 rounded-b-sm border-t border-black/20 order-first";
+          flexDir = "flex-col justify-start";
+        } else if (index >= 10 && index < 20) {
+          barClasses = "w-1/4 h-full rounded-r-sm border-l border-black/20 order-last";
+          flexDir = "flex-row justify-between";
+        } else if (index >= 20 && index < 30) {
+          barClasses = "w-full h-1/4 rounded-t-sm border-b border-black/20 order-last";
+          flexDir = "flex-col justify-end";
+        } else if (index >= 30 && index < 40) {
+          barClasses = "w-1/4 h-full rounded-l-sm border-r border-black/20 order-first";
+          flexDir = "flex-row justify-start";
+        }
+
+        return (
+          <div 
+            key={space.id} 
+            data-space-index={index}
+            style={{ gridColumn, gridRow }}
+            className={`bg-white relative border border-gray-300 flex ${flexDir} overflow-hidden ${isCorner ? 'p-1 md:p-2 justify-center items-center' : 'text-center'}`}
+          >
+            {colorClass && (
+              <div className={`${colorClass} ${barClasses} shadow-sm shrink-0`} />
+            )}
+            
+            <div className={`flex flex-col items-center justify-center p-0.5 md:p-1 w-full h-full text-[8px] md:text-[10px] leading-tight flex-1 ${colorClass ? (flexDir.includes('flex-row') ? 'w-3/4' : 'h-3/4') : ''}`}>
+              <span className={`font-bold ${isCorner ? 'text-xs md:text-sm' : ''} text-gray-900 text-center leading-tight md:leading-snug break-words hyphens-auto`}>{space.name}</span>
+              {space.price && <span className="text-gray-600 font-semibold text-[7px] md:text-[9px] mt-0.5">${space.price}</span>}
+              {ownerColor && (
+                <div className={`mt-0.5 md:mt-1 text-[7px] md:text-[8px] font-bold px-1 rounded text-white ${ownerColor}`}>
+                  {ownerId}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+});
+
+export const MonopolyBoard = memo(function MonopolyBoard({ state, children }: Props) {
   return (
     <div className="w-full">
       <div className="w-full max-w-6xl aspect-square bg-green-50 p-1 md:p-2 rounded-xl shadow-2xl border-4 border-gray-900 relative mx-auto" id="board-container">
@@ -95,55 +140,7 @@ export function MonopolyBoard({ state, children }: Props) {
           gridTemplateRows: '2fr repeat(9, 1fr) 2fr'
         }}
       >
-        {BOARD_SPACES.map((space, index) => {
-          const { gridColumn, gridRow } = getGridPosition(index);
-          const colorClass = PROPERTY_COLORS[space.id];
-          const ownerId = state.ownership[space.id];
-          const ownerIndex = state.players.findIndex(p => p.id === ownerId);
-          const ownerColor = ownerIndex !== -1 ? PLAYER_COLORS[ownerIndex % PLAYER_COLORS.length] : null;
-
-          const isCorner = index % 10 === 0;
-
-          // Figure out which orientation the color bar should be
-          let barClasses = "";
-          let flexDir = "flex-col";
-          if (index >= 0 && index < 10) { // Bottom row
-            barClasses = "w-full h-1/4 rounded-b-sm border-t border-black/20 order-first";
-            flexDir = "flex-col justify-start";
-          } else if (index >= 10 && index < 20) { // Left col
-            barClasses = "w-1/4 h-full rounded-r-sm border-l border-black/20 order-last";
-            flexDir = "flex-row justify-between";
-          } else if (index >= 20 && index < 30) { // Top row
-            barClasses = "w-full h-1/4 rounded-t-sm border-b border-black/20 order-last";
-            flexDir = "flex-col justify-end";
-          } else if (index >= 30 && index < 40) { // Right col
-            barClasses = "w-1/4 h-full rounded-l-sm border-r border-black/20 order-first";
-            flexDir = "flex-row justify-start";
-          }
-
-          return (
-            <div 
-              key={space.id} 
-              data-space-index={index}
-              style={{ gridColumn, gridRow }}
-              className={`bg-white relative border border-gray-300 flex ${flexDir} overflow-hidden ${isCorner ? 'p-1 md:p-2 justify-center items-center' : 'text-center'}`}
-            >
-              {colorClass && (
-                <div className={`${colorClass} ${barClasses} shadow-sm shrink-0`} />
-              )}
-              
-              <div className={`flex flex-col items-center justify-center p-0.5 md:p-1 w-full h-full text-[8px] md:text-[10px] leading-tight flex-1 ${colorClass ? (flexDir.includes('flex-row') ? 'w-3/4' : 'h-3/4') : ''}`}>
-                <span className={`font-bold ${isCorner ? 'text-xs md:text-sm' : ''} text-gray-900 text-center leading-tight md:leading-snug break-words hyphens-auto`}>{space.name}</span>
-                {space.price && <span className="text-gray-600 font-semibold text-[7px] md:text-[9px] mt-0.5">${space.price}</span>}
-                {ownerColor && (
-                  <div className={`mt-0.5 md:mt-1 text-[7px] md:text-[8px] font-bold px-1 rounded text-white ${ownerColor}`}>
-                    {ownerId}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        <BoardSpaces ownership={state.ownership} players={state.players} />
 
         {/* Center Board Area */}
         <div 
@@ -155,4 +152,4 @@ export function MonopolyBoard({ state, children }: Props) {
     </div>
   </div>
   );
-}
+});

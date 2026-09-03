@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import type { ICatanState, Hex, ResourceType, Vertex, Edge } from '@packages/catan-engine';
 
 interface Props {
@@ -20,10 +20,9 @@ const RESOURCE_COLORS: Record<ResourceType, string> = {
   DESERT: '#d6d3d1' // stone-300
 };
 
-// Math for pointing-topped hexes
 const HEX_SIZE = 55;
-const BOARD_OFFSET_X = 400; // Center X
-const BOARD_OFFSET_Y = 300; // Center Y
+const BOARD_OFFSET_X = 400;
+const BOARD_OFFSET_Y = 300;
 
 function getHexCoordinates(q: number, r: number) {
   const x = HEX_SIZE * Math.sqrt(3) * (q + r / 2);
@@ -41,7 +40,7 @@ function getCoordsFromId(id: string) {
   return { x, y, hexes };
 }
 
-function HexPolygon({ hex, onClick, isClickable }: { hex: Hex, onClick?: () => void, isClickable?: boolean }) {
+const HexPolygon = memo(function HexPolygon({ hex, onClick, isClickable }: { hex: Hex, onClick?: () => void, isClickable?: boolean }) {
   const { x, y } = getHexCoordinates(hex.q, hex.r);
   const points = Array.from({ length: 6 }).map((_, i) => {
     const angle_deg = 60 * i - 30;
@@ -77,9 +76,9 @@ function HexPolygon({ hex, onClick, isClickable }: { hex: Hex, onClick?: () => v
       )}
     </g>
   );
-}
+});
 
-function VertexNode({ vertex, colors, buildMode, onClick }: { vertex: Vertex, colors: Record<string, string>, buildMode: any, onClick: () => void }) {
+const VertexNode = memo(function VertexNode({ vertex, colors, buildMode, onClick }: { vertex: Vertex, colors: Record<string, string>, buildMode: 'SETTLEMENT' | 'ROAD' | 'CITY' | null, onClick: () => void }) {
   const { x, y } = getCoordsFromId(vertex.id);
   const isClickable = buildMode === 'SETTLEMENT' || (buildMode === 'CITY' && vertex.building === 'SETTLEMENT');
   
@@ -98,21 +97,19 @@ function VertexNode({ vertex, colors, buildMode, onClick }: { vertex: Vertex, co
       )}
     </g>
   );
-}
+});
 
-function EdgeNode({ edge, colors, buildMode, onClick }: { edge: Edge, colors: Record<string, string>, buildMode: any, onClick: () => void }) {
+const EdgeNode = memo(function EdgeNode({ edge, colors, buildMode, onClick }: { edge: Edge, colors: Record<string, string>, buildMode: 'SETTLEMENT' | 'ROAD' | 'CITY' | null, onClick: () => void }) {
   const { x, y, hexes } = getCoordsFromId(edge.id);
   const isClickable = buildMode === 'ROAD' && !edge.owner;
 
   if (!edge.owner && !isClickable && !edge.port) return null;
 
-  // Calculate angle for the road
   const h1 = hexes[0]!;
   const h2 = hexes[1]!;
   let angle = Math.atan2(h2.y - h1.y, h2.x - h1.x) * (180 / Math.PI);
-  angle += 90; // Perpendicular to the line between hex centers
+  angle += 90;
 
-  // Determine outward direction for the port
   const dx = x - BOARD_OFFSET_X;
   const dy = y - BOARD_OFFSET_Y;
   const outAngle = Math.atan2(dy, dx) * (180 / Math.PI);
@@ -121,7 +118,6 @@ function EdgeNode({ edge, colors, buildMode, onClick }: { edge: Edge, colors: Re
 
   return (
     <g transform={`translate(${x}, ${y})`}>
-      {/* Draw Port if exists */}
       {edge.port && (
         <g transform={`rotate(${outAngle}) translate(18, 0)`}>
           <circle cx="0" cy="0" r="12" fill={portColor} stroke="white" strokeWidth="2" className="drop-shadow-sm" />
@@ -131,7 +127,6 @@ function EdgeNode({ edge, colors, buildMode, onClick }: { edge: Edge, colors: Re
         </g>
       )}
       
-      {/* Draw Road */}
       <g transform={`rotate(${angle})`} onClick={isClickable ? onClick : undefined} className={isClickable ? "cursor-pointer hover:scale-125 transition-transform" : ""}>
         {!edge.owner && isClickable && (
           <rect x="-4" y="-20" width="8" height="40" fill="white" fillOpacity="0.5" stroke="#fbbf24" strokeWidth="2" rx="4" className="animate-pulse" />
@@ -142,9 +137,9 @@ function EdgeNode({ edge, colors, buildMode, onClick }: { edge: Edge, colors: Re
       </g>
     </g>
   );
-}
+});
 
-export function CatanBoard({ state, playerId: _playerId, buildMode, onVertexClick, onEdgeClick, onHexClick, children }: Props) {
+export const CatanBoard = memo(function CatanBoard({ state, playerId: _playerId, buildMode, onVertexClick, onEdgeClick, onHexClick, children }: Props) {
   if (!state) return null;
   const playerColors = Object.fromEntries(state.players.map(p => [p.id, p.color]));
 
@@ -184,4 +179,4 @@ export function CatanBoard({ state, playerId: _playerId, buildMode, onVertexClic
       </div>
     </div>
   );
-}
+});

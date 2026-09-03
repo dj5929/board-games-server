@@ -20,6 +20,7 @@ Games currently implemented:
 - **Per-game player rules** — the Lobby's player selector adapts to each game's official range (Monopoly 2–8, Catan 3–4, Scotland Yard 3–6), enforced at both the server and engine layers.
 - **Defense in depth validation** — the same Zod schemas validate every action on both the client *and* the server.
 - **Polish** — a rich React UI with contextual HUDs, animated tokens, procedural Web Audio sound effects, and a live event log.
+- **Performance-conscious UI** — the three game rooms are code-split via `React.lazy` + `Suspense` (users only download the game they pick), Vite `manualChunks` isolate `react`/`react-dom` and the Scotland-Yard-only zoom library into cached vendor chunks, and the boards are memoized so heavy static layers (e.g. Scotland Yard's 199-node graph) never re-render on every state update (Phase 34).
 - **Fully CI-backed** — GitHub Actions runs typecheck, lint, the full test suite, and production builds on every push/PR.
 
 ---
@@ -172,6 +173,62 @@ This project uses different TypeScript versions in different packages intentiona
 Workspace is an npm monorepo; install once from the root with `npm install`. See the [Quick Start](#quick-start) table above for common commands.
 
 The server binds `http://localhost:3000`, serves CORS only to the Vite dev client (`localhost:5173`), and requires a valid `?playerId=` + `token=` pair for every WebSocket room connection.
+
+## 🚀 Production Deployment (single VPS, git-push triggered)
+
+This project is built to run as a **single Docker Compose stack on one VPS/VM** (server + client + Redis). There's a GitHub Actions workflow (`.github/workflows/deploy.yml`) that **re-deploys automatically on every push to `main`** — no Vercel/serverless needed.
+
+> ⚠️ A note on hosting: a real-time, stateful WebSocket game cannot run on Vercel's stateless serverless functions. A single VPS running Docker is the correct target. The full CI pipeline (`.github/workflows/ci.yml`) runs typecheck, lint, tests, and both production builds on every push before the deploy workflow runs.
+
+### One-time VPS bootstrap
+
+On a fresh Ubuntu-ish VPS (Node/Docker not strictly required — the images are self-contained, but Docker + Compose are):
+
+```bash
+# 1. Install Docker Engine + Compose plugin, then:
+sudo usermod -aG docker $USER && exec su -l $USER   # re-login for docker group
+
+# 2. Deploy dir (must match DEPLOY_DIR in the workflow — default /opt/board-game-server)
+sudo mkdir -p /opt/board-game-server && sudo chown $USER /opt/board-game-server
+
+# 3. Create the production env file (values below; see .env.production.example)
+#    Copy it now — git clone needs it before first `docker compose up`.
+vi /opt/board-game-server/.env
+```
+
+The `.env` (not tracked in git) overrides the compose defaults:
+
+```env
+CLIENT_ORIGIN=https://games.example.com
+CLIENT_API_URL=https://api.example.com
+```
+
+### GitHub secrets (for the deploy workflow)
+
+Add these repo **Actions secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Purpose |
+| --- | --- |
+| `VPS_HOST` | Public IP / hostname of the VPS. |
+| `VPS_USER` | SSH username (the non-root user in the `docker` group). |
+| `VPS_SSH_KEY` | Private SSH key (RSA/Ed25519) authorized on the VPS. |
+| `VPS_PORT` | *(optional)* SSH port, default `22`. |
+
+### How each deploy runs
+
+On push to `main` (CI and deploy run concurrently), the deploy workflow SSHes in and:
+1. Clones/pulls the repo into `/opt/board-game-server` (via `git reset --hard origin/main`).
+2. Loads your server-side `.env`.
+3. Runs `docker compose up -d --build` — rebuilds only changed layers (fast incremental rebuilds), starts Redis + server + client, and persists game state in the `redis-data` volume.
+4. Prunes dangling images to keep disk clean.
+
+> To make deploys wait for CI to pass first, enable **branch protection → "Require status checks"** on `main` for the `CI` workflow. Since only passing code merges to `main`, the push-triggered deploy then only ever ships verified code.
+
+### TLS / reverse proxy (recommended for HTTPS)
+
+The compose stack serves plain HTTP (`:3000` server, `:5173` client). For production use a reverse proxy (nginx/caddy/traefik) in front to terminate TLS and forward to the containers. If you add the proxy, set `CLIENT_ORIGIN`/`CLIENT_API_URL` to the public HTTPS URLs and make sure the proxy forwards WebSocket `Upgrade` headers to the server port.
+
+---
 
 ## 🧭 Engineering Docs
 

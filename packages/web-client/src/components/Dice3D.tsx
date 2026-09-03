@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, memo } from 'react';
 
 interface Props {
   dice1: number;
@@ -6,7 +6,7 @@ interface Props {
   onAnimationEnd: () => void;
 }
 
-export function Dice3D({ dice1, dice2, onAnimationEnd }: Props) {
+export const Dice3D = memo(function Dice3D({ dice1, dice2, onAnimationEnd }: Props) {
   const [isRolling, setIsRolling] = useState(true);
 
   const onAnimationEndRef = useRef(onAnimationEnd);
@@ -44,7 +44,6 @@ export function Dice3D({ dice1, dice2, onAnimationEnd }: Props) {
 
   const faceClasses = "absolute w-20 h-20 bg-white border-2 border-gray-300 rounded-xl shadow-lg flex items-center justify-center p-3 box-border";
   const getFaceStyle = (value: number) => {
-    // Determine dot layout
     let layoutClass = "";
     if (value === 1) layoutClass = "flex items-center justify-center";
     else if (value === 2) layoutClass = "flex justify-between flex-col items-center [&>div:first-child]:self-start [&>div:last-child]:self-end h-full w-full py-1";
@@ -58,32 +57,6 @@ export function Dice3D({ dice1, dice2, onAnimationEnd }: Props) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
-      <style>{`
-        .dice-container {
-          perspective: 1000px;
-        }
-        .dice {
-          width: 80px;
-          height: 80px;
-          transform-style: preserve-3d;
-          transition: transform 1s cubic-bezier(0.25, 1, 0.5, 1);
-        }
-        .dice-rolling {
-          animation: rolling 1.5s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
-        }
-        @keyframes rolling {
-          0% { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
-          50% { transform: rotateX(720deg) rotateY(360deg) rotateZ(180deg); }
-          100% { transform: var(--final-transform); }
-        }
-        .face-1 { transform: translateZ(40px); }
-        .face-2 { transform: rotateX(90deg) translateZ(40px); }
-        .face-3 { transform: rotateY(90deg) translateZ(40px); }
-        .face-4 { transform: rotateY(-90deg) translateZ(40px); }
-        .face-5 { transform: rotateX(-90deg) translateZ(40px); }
-        .face-6 { transform: rotateX(180deg) translateZ(40px); }
-      `}</style>
-      
       <div className="flex gap-8 dice-container">
         {[dice1, dice2].map((diceValue, idx) => (
           <div 
@@ -117,4 +90,4 @@ export function Dice3D({ dice1, dice2, onAnimationEnd }: Props) {
       </div>
     </div>
   );
-}
+});

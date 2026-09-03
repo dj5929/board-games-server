@@ -37,6 +37,7 @@ export interface IMonopolyState extends IGameState {
 export type MonopolyAction = 
   | (IPlayerAction & { type: 'ROLL_DICE' })
   | (IPlayerAction & { type: 'END_TURN' })
+  | (IPlayerAction & { type: 'FORCE_END_TURN' })
   | (IPlayerAction & { type: 'BUY_PROPERTY' })
   | (IPlayerAction & { type: 'PAY_JAIL_FINE' })
   | (IPlayerAction & { type: 'MORTGAGE_PROPERTY', propertyId: PropertyId })
@@ -55,6 +56,7 @@ export type MonopolyAction =
 export type MonopolyEvent = 
   | (IGameEvent & { type: 'DICE_ROLLED', playerId: PlayerId, dice1: number, dice2: number, position: number })
   | (IGameEvent & { type: 'TURN_ENDED', nextPlayerId: PlayerId })
+  | (IGameEvent & { type: 'TURN_TIMED_OUT', playerId: PlayerId, nextPlayerId: PlayerId })
   | (IGameEvent & { type: 'PROPERTY_BOUGHT', propertyId: PropertyId, playerId: PlayerId, price: number })
   | (IGameEvent & { type: 'RENT_PAID', fromPlayerId: PlayerId, toPlayerId: PlayerId, amount: number })
   | (IGameEvent & { type: 'PASSED_GO', playerId: PlayerId, amount: number })
@@ -64,8 +66,7 @@ export type MonopolyEvent =
   | (IGameEvent & { type: 'PROPERTY_UNMORTGAGED', propertyId: PropertyId, playerId: PlayerId, amount: number })
   | (IGameEvent & { type: 'HOUSE_BOUGHT', propertyId: PropertyId, playerId: PlayerId, amount: number })
   | (IGameEvent & { type: 'HOUSE_SOLD', propertyId: PropertyId, playerId: PlayerId, amount: number })
-  | (IGameEvent & { type: 'GAME_RESTARTED' })
-  | (IGameEvent & { type: 'TRADE_PROPOSED', trade: ITradeOffer })
+  | (IGameEvent & { type: 'GAME_RESTARTED' })  | (IGameEvent & { type: 'TRADE_PROPOSED', trade: ITradeOffer })
   | (IGameEvent & { type: 'TRADE_ACCEPTED', tradeId: string })
   | (IGameEvent & { type: 'TRADE_REJECTED', tradeId: string })
   | (IGameEvent & { type: 'TRADE_CANCELLED', tradeId: string })

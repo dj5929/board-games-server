@@ -9,6 +9,7 @@ import { RulebookModal } from './RulebookModal';
 import { CatanDiscardModal } from './CatanDiscardModal';
 import { CatanRobberVictimModal } from './CatanRobberVictimModal';
 import { CatanDevCardManager } from './CatanDevCardManager';
+import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -47,6 +48,7 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
   const [isPlayingKnight, setIsPlayingKnight] = useState(false);
   const [isPlayingRoadBuilding, setIsPlayingRoadBuilding] = useState(false);
   const [roadBuildingEdges, setRoadBuildingEdges] = useState<string[]>([]);
+  const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
 
   const addToast = (msg: string) => {
@@ -65,6 +67,7 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'STATE_UPDATE') {
+        setTurnTimer(data.timer);
         setState(data.state);
         setBuildMode(null); // Reset build mode on state update
       } else if (data.type === 'EVENTS') {
@@ -78,6 +81,8 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
             setTimeout(() => setIsAnimating(false), 2000);
           } else if (ev.type === 'TURN_ENDED') {
             msg = `Turn ended. Next player: ${ev.nextPlayerId}`;
+          } else if (ev.type === 'TURN_TIMED_OUT') {
+            msg = `${ev.playerId} ran out of time. Turn passed to ${ev.nextPlayerId}.`;
           } else if (ev.type === 'SETTLEMENT_BUILT') {
             msg = `Settlement built by ${ev.playerId}`;
           } else if (ev.type === 'ROAD_BUILT') {
@@ -383,6 +388,7 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
           <p className="text-gray-400 text-sm">You are playing as <span className="text-orange-400 font-mono">{localPlayerIds.join(', ')}</span></p>
         </div>
         <div className="flex gap-4 items-center">
+          <TurnTimer timer={turnTimer} isMyTurn={isMyTurn} />
           <button onClick={() => setShowRules(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
             Rules
           </button>

@@ -924,6 +924,33 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         return { success: true, data: { nextState, events } };
       }
 
+      // System-initiated timeout during MAIN_TURN. Unlike END_TURN it does not
+      // require the player to have rolled, so an AFK / stalled player advances.
+      // It is intentionally NOT valid during DISCARD_PHASE / ROBBER_PLACEMENT
+      // (mandatory sub-phases) or the initial placement phases.
+      case 'FORCE_END_TURN': {
+        if (currentState.turnPhase !== 'MAIN_TURN') return { success: false, error: 'Cannot force end turn now' };
+        if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
+        nextState.hasRolled = false;
+        const nextIndex = (activePlayerIndex + 1) % currentState.players.length;
+        const nextPlayerId = currentState.players[nextIndex]!.id;
+
+        activePlayer.developmentCards.forEach(c => {
+          c.boughtThisTurn = false;
+        });
+
+        if (nextState.activeTrade) {
+          events.push({ type: 'TRADE_CANCELLED', tradeId: nextState.activeTrade.id });
+          nextState.activeTrade = null;
+        }
+
+        nextState.playedDevCardThisTurn = false;
+        nextState.activePlayerId = nextPlayerId;
+        events.push({ type: 'TURN_TIMED_OUT', playerId: action.playerId, nextPlayerId });
+        checkWinConditionAndAwards(nextState, events);
+        return { success: true, data: { nextState, events } };
+      }
+
       default:
         return { success: false, error: 'Unknown action type' };
     }
@@ -972,6 +999,10 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
         return currentState.turnPhase === 'MAIN_TURN' && !currentState.playedDevCardThisTurn;
       case 'END_TURN':
         return currentState.turnPhase === 'MAIN_TURN' && currentState.hasRolled;
+      case 'FORCE_END_TURN':
+        // System timeout: valid during MAIN_TURN regardless of hasRolled so an
+        // AFK player advances. Not valid during sub-phases or initial placement.
+        return currentState.turnPhase === 'MAIN_TURN';
       default:
         return false;
     }

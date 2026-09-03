@@ -8,6 +8,7 @@ import { TradeNotification } from './TradeNotification';
 import { SoundEngine } from '../utils/SoundEngine';
 import { Dice3D } from './Dice3D';
 import { RulebookModal } from './RulebookModal';
+import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -43,6 +44,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
   const [showRules, setShowRules] = useState(false);
   const [diceRoll, setDiceRoll] = useState<{dice1: number, dice2: number} | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingStateRef = useRef<IMonopolyState | null>(null);
   const stateTimerRef = useRef<number | null>(null);
@@ -63,6 +65,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'STATE_UPDATE') {
+        setTurnTimer(data.timer);
         pendingStateRef.current = data.state;
         if (stateTimerRef.current) clearTimeout(stateTimerRef.current);
         // Default commit delay to allow EVENTS to arrive and optionally extend the delay
@@ -75,7 +78,10 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
           const newEvents: EventLogEntry[] = [];
           events.forEach((ev: any) => {
             let msg = '';
-            if (ev.type === 'PROPERTY_BOUGHT') {
+            if (ev.type === 'TURN_TIMED_OUT') {
+              msg = `${ev.playerId} ran out of time. Turn passed to ${ev.nextPlayerId}.`;
+              SoundEngine.playTurnChime();
+            } else if (ev.type === 'PROPERTY_BOUGHT') {
               const space = BOARD_SPACES.find(s => s.id === ev.propertyId);
               msg = `${ev.playerId} bought ${space?.name} for $${ev.price}`;
               SoundEngine.playCashRegister();
@@ -289,6 +295,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
           <p className="text-gray-400 text-sm">You are playing as <span className="text-blue-400 font-mono">{localPlayerIds.join(', ')}</span></p>
         </div>
         <div className="flex gap-2 md:gap-4 items-center">
+          <TurnTimer timer={turnTimer} isMyTurn={isMyTurn} />
           <button onClick={() => setShowRules(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
             Rules
           </button>

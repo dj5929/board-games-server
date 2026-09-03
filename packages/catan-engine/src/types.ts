@@ -80,6 +80,7 @@ export interface ICatanState extends IGameState {
 export type ICatanAction = IPlayerAction & (
   | { type: 'ROLL_DICE' }
   | { type: 'END_TURN' }
+  | { type: 'FORCE_END_TURN' }
   // Robber & Discard mechanics
   | { type: 'DISCARD_RESOURCES'; resources: Record<Exclude<ResourceType, 'DESERT'>, number> }
   | { type: 'MOVE_ROBBER'; hexId: string; targetPlayerId?: PlayerId }
@@ -107,6 +108,7 @@ export type ICatanAction = IPlayerAction & (
 export type ICatanEvent = IGameEvent & (
   | { type: 'DICE_ROLLED'; dice1: number; dice2: number; total: number }
   | { type: 'TURN_ENDED'; nextPlayerId: PlayerId }
+  | { type: 'TURN_TIMED_OUT'; playerId: PlayerId; nextPlayerId: PlayerId }
   | { type: 'RESOURCES_DISCARDED'; playerId: PlayerId; amount: number }
   | { type: 'ROBBER_MOVED'; playerId: PlayerId; hexId: string }
   | { type: 'STOLEN_RESOURCE'; thiefId: PlayerId; victimId: PlayerId; resource: Exclude<ResourceType, 'DESERT'> }

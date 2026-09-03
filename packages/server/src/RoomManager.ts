@@ -1,6 +1,7 @@
 import { Room } from './Room';
 import { IGameEngine, IGameState, IPlayerAction, IGameEvent } from '@packages/engine-core';
 import { RedisStore, redisReviver } from './RedisStore';
+import { PubSubManager } from './PubSubManager';
 
 const ROOM_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
@@ -13,13 +14,19 @@ export class RoomManager {
   private rooms: Map<string, Room<any, any, any>> = new Map();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private logger: Logger = console;
+  private pubsub: PubSubManager;
 
   constructor() {
+    this.pubsub = new PubSubManager();
     this.startCleanup();
   }
 
   public setLogger(logger: Logger) {
     this.logger = logger;
+  }
+
+  public setPubSubLogger(logger: Logger) {
+    this.pubsub.setLogger(logger);
   }
 
   public createRoom<S extends IGameState, A extends IPlayerAction, E extends IGameEvent>(
@@ -30,6 +37,7 @@ export class RoomManager {
       throw new Error('Room capacity reached');
     }
     this.rooms.set(room.id, room);
+    room.setPubSub(this.pubsub);
     return room.id;
   }
 
@@ -62,9 +70,11 @@ export class RoomManager {
         // "acts for any seat" capability across a server restart.
         const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, [], data.state, {
           isHotSeat: data.isHotSeat === true,
-          ownerPlayerId: data.ownerPlayerId ?? null
+          ownerPlayerId: data.ownerPlayerId ?? null,
+          turnTimeLimitMs: data.turnTimeLimitMs ?? 0
         });
         room.loadState(data);
+        room.setPubSub(this.pubsub);
         this.rooms.set(room.id, room);
         this.logger.log(`[RoomManager] Rehydrated room ${room.id} (${data.gameType}) from Redis`);
       } catch (e) {

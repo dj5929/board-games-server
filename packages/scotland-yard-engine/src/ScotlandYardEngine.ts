@@ -90,6 +90,13 @@ export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardActi
     const player = currentState.players.find(p => p.id === currentState.activePlayerId);
     if (!player) return false;
 
+    if (action.type === 'SKIP_TURN') {
+      // System-initiated timeout: the active player's turn is skipped without
+      // moving. Mr. X is never auto-skipped (only the human/active player can
+      // trigger it, and the server only sends it for stalled players).
+      return true;
+    }
+
     if (action.type === 'MOVE') {
       if (player.tickets[action.payload.ticketType] <= 0) return false;
       return _isValidSingleMove(currentState, player, action.payload.targetNode, action.payload.ticketType, player.position);
@@ -138,6 +145,47 @@ export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardActi
     const currentPlayerId = currentState.activePlayerId;
     const playerIndex = nextState.players.findIndex(p => p.id === currentPlayerId);
     const nextPlayer = nextState.players[playerIndex]!;
+
+    // System-initiated timeout: skip the active player's turn without moving
+    // or consuming tickets. Also counts as a round for Mr. X (his log advances
+    // the wrap logic below identically to a normal move).
+    if (action.type === 'SKIP_TURN') {
+      const skipIndex = nextState.playerOrder.indexOf(currentPlayerId);
+      let nextPlayerIndex = (skipIndex + 1) % nextState.playerOrder.length;
+      if (nextPlayerIndex === 0) {
+        nextState.currentTurn += 1;
+      }
+
+      // Find the next player who can actually move (detectives may be stuck).
+      let allStuck = true;
+      for (let i = 1; i < nextState.playerOrder.length; i++) {
+        const pId = nextState.playerOrder[i]!;
+        const p = nextState.players.find(pl => pl.id === pId)!;
+        const hasTickets = p.tickets.taxi > 0 || p.tickets.bus > 0 || p.tickets.underground > 0;
+        if (hasTickets) { allStuck = false; break; }
+      }
+      if (allStuck) {
+        nextState.status = 'FINISHED';
+        nextState.winner = 'MR_X';
+        events.push({ type: 'GAME_OVER', payload: { winner: 'MR_X', reason: 'All detectives are stuck!' } });
+      } else {
+        let nextPId = nextState.playerOrder[nextPlayerIndex]!;
+        let p = nextState.players.find(pl => pl.id === nextPId)!;
+        while (nextPlayerIndex !== 0 && (p.tickets.taxi === 0 && p.tickets.bus === 0 && p.tickets.underground === 0)) {
+          nextPlayerIndex = (nextPlayerIndex + 1) % nextState.playerOrder.length;
+          if (nextPlayerIndex === 0) break;
+          nextPId = nextState.playerOrder[nextPlayerIndex]!;
+          p = nextState.players.find(pl => pl.id === nextPId)!;
+        }
+      }
+
+      if (nextState.status === 'IN_PROGRESS') {
+        const nextPlayerId = nextState.playerOrder[nextPlayerIndex]!;
+        nextState.activePlayerId = nextPlayerId;
+        events.push({ type: 'TURN_SKIPPED', payload: { playerId: currentPlayerId, nextPlayerId } });
+      }
+      return { success: true, data: { nextState, events } };
+    }
 
     const moves = action.type === 'MOVE' ? [action.payload] : [action.payload.move1, action.payload.move2];
     

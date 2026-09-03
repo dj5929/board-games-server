@@ -24,8 +24,10 @@ export interface ScotlandYardState extends IGameState {
 
 export type ScotlandYardAction = 
   | { type: 'MOVE'; playerId: PlayerId; payload: { targetNode: number; ticketType: TransportType } }
-  | { type: 'DOUBLE_MOVE'; playerId: PlayerId; payload: { move1: { targetNode: number; ticketType: TransportType }, move2: { targetNode: number; ticketType: TransportType } } };
+  | { type: 'DOUBLE_MOVE'; playerId: PlayerId; payload: { move1: { targetNode: number; ticketType: TransportType }, move2: { targetNode: number; ticketType: TransportType } } }
+  | { type: 'SKIP_TURN'; playerId: PlayerId };
 
 export type ScotlandYardEvent = 
   | { type: 'PLAYER_MOVED'; payload: { playerId: PlayerId; targetNode?: number | undefined; ticketType: TransportType } }
+  | { type: 'TURN_SKIPPED'; payload: { playerId: PlayerId; nextPlayerId: PlayerId } }
   | { type: 'GAME_OVER'; payload: { winner: PlayerRole; reason: string } };

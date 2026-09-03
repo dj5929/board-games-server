@@ -39,36 +39,36 @@ vi.mock('../ScotlandYardRoom', () => ({
 }));
 
 describe('App', () => {
-  it('renders the audio toggle and the lobby initially', () => {
+  it('renders the audio toggle and the lobby initially', async () => {
     render(<App />);
     expect(screen.getByTestId('audio-toggle')).toBeInTheDocument();
-    expect(screen.getByText('LOBBY')).toBeInTheDocument();
+    expect(await screen.findByText('LOBBY')).toBeInTheDocument();
     expect(screen.queryByText('GAME-MONOPOLY')).not.toBeInTheDocument();
   });
 
-  it('routes a monopoly join into GameRoom and back on leave', () => {
+  it('routes a monopoly join into GameRoom and back on leave', async () => {
     testHooks.setGameType('monopoly');
     render(<App />);
-    fireEvent.click(screen.getByText('JOIN'));
+    fireEvent.click(await screen.findByText('JOIN'));
 
-    expect(screen.getByText('GAME-MONOPOLY')).toBeInTheDocument();
+    expect(await screen.findByText('GAME-MONOPOLY')).toBeInTheDocument();
     expect(screen.queryByText('LOBBY')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('LEAVE'));
-    expect(screen.getByText('LOBBY')).toBeInTheDocument();
+    expect(await screen.findByText('LOBBY')).toBeInTheDocument();
   });
 
-  it('routes a catan join into CatanRoom', () => {
+  it('routes a catan join into CatanRoom', async () => {
     testHooks.setGameType('catan');
     render(<App />);
-    fireEvent.click(screen.getByText('JOIN'));
-    expect(screen.getByText('GAME-CATAN')).toBeInTheDocument();
+    fireEvent.click(await screen.findByText('JOIN'));
+    expect(await screen.findByText('GAME-CATAN')).toBeInTheDocument();
   });
 
-  it('routes a scotland-yard join into ScotlandYardRoom', () => {
+  it('routes a scotland-yard join into ScotlandYardRoom', async () => {
     testHooks.setGameType('scotland-yard');
     render(<App />);
-    fireEvent.click(screen.getByText('JOIN'));
-    expect(screen.getByText('GAME-SCOTLAND')).toBeInTheDocument();
+    fireEvent.click(await screen.findByText('JOIN'));
+    expect(await screen.findByText('GAME-SCOTLAND')).toBeInTheDocument();
   });
 });

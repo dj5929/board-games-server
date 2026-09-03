@@ -431,7 +431,8 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
         break;
       }
 
-      case 'END_TURN': {
+      case 'END_TURN':
+      case 'FORCE_END_TURN': {
         currentPlayer.hasRolled = false;
         currentPlayer.doublesCount = 0;
         
@@ -446,7 +447,12 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
         do {
           nextState.currentPlayerIndex = (nextState.currentPlayerIndex + 1) % nextState.players.length;
         } while (nextState.players[nextState.currentPlayerIndex]!.status === 'BANKRUPT');
-        events.push({ type: 'TURN_ENDED', nextPlayerId: nextState.players[nextState.currentPlayerIndex]!.id });
+        const nextPlayerId = nextState.players[nextState.currentPlayerIndex]!.id;
+        if (action.type === 'FORCE_END_TURN') {
+          events.push({ type: 'TURN_TIMED_OUT', playerId: currentPlayer.id, nextPlayerId });
+        } else {
+          events.push({ type: 'TURN_ENDED', nextPlayerId });
+        }
         break;
       }
 
@@ -807,6 +813,9 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
     
     if (action.type === 'ROLL_DICE') return !currentPlayer.hasRolled;
     if (action.type === 'END_TURN') return currentPlayer.hasRolled;
+    // FORCE_END_TURN is a system-initiated timeout: allowed regardless of
+    // whether the player has rolled, so an AFK / stalled player's turn advances.
+    if (action.type === 'FORCE_END_TURN') return true;
     if (action.type === 'PAY_JAIL_FINE') {
       return currentPlayer.inJail && !currentPlayer.hasRolled && currentPlayer.money >= 50;
     }

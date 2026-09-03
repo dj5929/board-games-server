@@ -1,0 +1,61 @@
+name: Deploy to VPS
+
+# Trigger a redeploy to the production VPS on every push to main (and manually via
+# "Run workflow"). Assumes the VPS has been bootstrapped once with Docker + Compose
+# and the compose stack (see README "Production Deployment").
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # NOTE: ci.yml and this workflow both trigger on push and run concurrently.
+    # If you want deploy to be strictly gated on CI passing, enable GitHub branch
+    # protection ("Require status checks to pass") on `main` for the CI workflow,
+    # so a failing push never merges in the first place.
+    # Use a concurrency guard so only one deploy runs at a time.
+    concurrency:
+      group: prod-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          # Build and run directly from the repo's git HEAD on the server. A shallow
+          # clone on first run; subsequent runs just pull + rebuild changed layers.
+          script: |
+            set -e
+            DEPLOY_DIR="${DEPLOY_DIR:-/opt/board-game-server}"
+
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              sudo git clone --depth 1 "https://github.com/${{ github.repository }}.git" "$DEPLOY_DIR"
+            fi
+
+            cd "$DEPLOY_DIR"
+            sudo git fetch --depth 1 origin main
+            sudo git reset --hard origin/main
+
+            # Load production secrets/environment if a .env exists on the server
+            # (copied once during bootstrapping, never committed to git).
+            if sudo test -f "$DEPLOY_DIR/.env"; then
+              set -a
+              # shellcheck disable=SC1091
+              . <(sudo cat "$DEPLOY_DIR/.env")
+              set +a
+            fi
+
+            sudo docker compose pull
+            sudo docker compose up -d --build --remove-orphans
+
+            # Prune dangling images/layers from previous builds to save disk.
+            sudo docker image prune -f || true

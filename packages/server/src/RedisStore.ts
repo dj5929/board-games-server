@@ -65,5 +65,12 @@ export const RedisStore = {
 
   isRedisConnected(): boolean {
     return redis !== null;
+  },
+
+  duplicateClient(): Redis | null {
+    if (redis) {
+      return redis.duplicate();
+    }
+    return null;
   }
 };

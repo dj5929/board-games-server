@@ -4,6 +4,16 @@ This document tracks identified bugs, type safety issues, and planned improvemen
 
 ## 🟢 Completed Fixes
 
+### 19. UI Bundle Bloat / No Code-Splitting or Memoization (Phase 34, Batch 1)
+- **Location:** `packages/web-client/src/App.tsx`, `vite.config.ts`, `components/{Dice3D,MonopolyBoard,CatanBoard,ScotlandYardBoard}.tsx`, `index.css`
+- **Issue:** All three game rooms were eagerly imported and bundled into one JS payload, so every user downloaded all games whether or not they played them. The boards and `Dice3D` re-rendered their entire (heavy) tree on every `STATE_UPDATE`, and `Dice3D` re-injected a static `<style>` tag on each mount.
+- **Fix:**
+  - `React.lazy` + `Suspense` code-splits `Lobby`, `GameRoom`, `CatanRoom`, `ScotlandYardRoom`. Production build now emits separate per-game chunks (`GameRoom` 35 kB, `CatanRoom` 39 kB, `ScotlandYardRoom` 30 kB) instead of one monolithic bundle.
+  - Vite `manualChunks`: `react`/`react-dom` → `vendor-react` (cached baseline); `react-zoom-pan-pinch` isolated to a Scotland-Yard-only chunk.
+  - Extracted `Dice3D`'s inline `<style>`/keyframes into a static `index.css` block and wrapped `Dice3D` in `React.memo`.
+  - Memoized the three boards (`React.memo`), extracted Monopoly's `BoardSpaces` sub-grid, memoized Catan's `HexPolygon`/`VertexNode`/`EdgeNode`, and isolated Scotland Yard's static 199-node graph into a never-re-rendering `StaticGraph` with tokens in a separate memoized `PlayerTokens`.
+- **Status:** ✅ Fixed — App tests updated to resolve the lazy chunks (`findByText`/async). Full web-client suite green (42 tests), root typecheck clean, root + web-client lint clean (only pre-existing `exhaustive-deps` warnings), production `vite build` passes with the split chunk layout.
+
 ### 1. `PlayerId` Type Import Error
 - **Location:** `packages/web-client/src/components/CatanDevCardManager.tsx`
 - **Issue:** The `PlayerId` type was incorrectly imported from `@packages/catan-engine`, which does not re-export it.
@@ -164,6 +174,17 @@ This document tracks identified bugs, type safety issues, and planned improvemen
 - **Issue:** JSON cannot represent `Infinity`. `Room.saveState()` used `JSON.stringify(data)`, turning Monopoly's `bankMoney: Infinity` (Phase 27 unlimited bank) into `null` in the Redis snapshot. After a restart, the rehydrated room had `bankMoney: null`, corrupting the engine's money arithmetic. Uncovered by the containerization crash-recovery test.
 - **Fix:** Added `redisReplacer` / `redisReviver` to `RedisStore.ts` that tag-stream `Infinity`/`-Infinity`/`NaN` (`__JSON_INFINITY__` sentinel). `saveState()` serializes with the replacer; `initFromRedis` parses with the reviver, restoring real values.
 - **Status:** ✅ Fixed — regression test asserts `bankMoney === Infinity` after rehydration; verified live that the snapshot stores `"__JSON_INFINITY__"` and the rehydrated room state is intact.
+
+### 15. No Multi-Instance WebSocket Broadcasting (Redis Pub/Sub Adapter)
+- **Location:** `packages/server/src/PubSubManager.ts` (new), `packages/server/src/RedisStore.ts`, `packages/server/src/Room.ts`, `packages/server/src/RoomManager.ts`, `packages/server/src/server.ts`
+- **Issue:** State is persisted to Redis, but each server instance only broadcasts to its own in-memory `Room.connections`. A player connected to instance B never receives updates for actions processed on instance A, so the platform could not scale horizontally across multiple server instances.
+- **Fix:**
+  1. Added `PubSubManager.ts` — a Redis Pub/Sub adapter. `RedisStore` now exposes `duplicateClient()` for a dedicated subscriber connection.
+  2. `Room.broadcastState()` / `broadcastEvents()` now publish `{ state, events }` to a per-room Redis channel (`ps:room:{id}`) in addition to local delivery.
+  3. `Room` subscribes to its channel on the first local connection and unsubscribes on the last (via `setPubSub`, `addConnection`, `removeConnection`, `closeAllConnections`). Remote messages are re-projected per local player via `getStateForPlayer` (preserving hidden-information guarantees) and delivered as `STATE_UPDATE` + `EVENTS`.
+  4. `RoomManager` owns a `PubSubManager` and attaches it to every created/rehydrated room; `server.ts` wires the pubsub logger to `fastify.log`.
+  5. In single-instance mode (no `REDIS_URL`) the manager is a no-op, so existing local behavior is unchanged.
+- **Status:** ✅ Fixed — added `PubSubManager.test.ts` (2-instance cross-delivery via `ioredis-mock`, channel isolation, unsubscribe) and Room pubsub tests (subscription lifecycle, remote delivery + projection, publish-on-broadcast). Full suite green (297 tests), typecheck, root lint, and server build all pass.
 
 ---
 
@@ -610,4 +631,18 @@ The following fixes address the verified open issues outlined in `FINAL_AUDIT.md
 - **Fix:** Option (b) implemented — a server-side room-locality flag. `POST /rooms` accepts `{ hotSeat: true }`; the room is flagged `isHotSeat` with the creator recorded as `ownerPlayerId`, and both flags persist through Redis rehydration (`Room.saveState`/`loadState`, `RoomManager.initFromRedis`). The WS dispatch rule lets the **owner's** session act for any claimed seat (`dispatchPlayerId = claimed` when `room.isHotSeat && playerId === room.ownerPlayerId && room.hasPlayer(claimed)`), while non-owner seats (online joiners) stay strictly one-seat-one-token. `Room.sendRejected` also routes rejection feedback for an unconnected seat to the owner's connection so the shared browser still sees `ACTION_REJECTED`. The client Lobby sends `hotSeat: mode === 'local'`.
 - **Tests:** `server.test.ts` — create-room flag round-trip, owner claim honoured (engine rejects as not that seat's turn), non-owner forged `playerId` ignored; `RoomManager.test.ts` — rehydration restores flags; `Room.test.ts` — flags + `hasPlayer`; `Lobby.test.tsx` — body now carries `hotSeat: true`.
 - **Status:** ✅ **DONE** (documented in `docs/ARCHITECTURE.md` §5.3/§8)
+
+### 🔴 NEW (Phase 33): Turn Timer / AFK Auto-Forfeit Implemented
+- **Location:** `packages/{monopoly,catan,scotland-yard}-engine/src`, `packages/server/src/{Room,RoomManager,server,schemas}.ts`, `packages/web-client/src/components/{TurnTimer,GameRoom,CatanRoom,ScotlandYardRoom}.tsx`
+- **Feature:** Enforce active play with a per-room turn timer and auto-forfeit. The user approved auto-forfeit + a visual client countdown for all three games.
+- **Design:** Timing lives at the **server `Room` level** (not in engine state) so pure engines stay untouched; the forced-turn actions themselves are pure reducer additions.
+- **Implementation:**
+  - Engines: Monopoly/Catan `FORCE_END_TURN` (emits `TURN_TIMED_OUT`), Scotland Yard `SKIP_TURN` (emits `TURN_SKIPPED`). Catan's force is **only valid during `MAIN_TURN`** (never sub-phases/placement); Monopoly's is blocked while the active player owes debt.
+  - `Room.ts` tracks `turnStartedAt` (reset on each successful `dispatch`) and runs an `unref()`'d `setInterval` tick (started on first connection, cleared on last/close) that auto-dispatches the game's forced action once the turn exceeds `turnTimeLimitMs`. Enforced only while the game is `IN_PROGRESS`; a rejected force (e.g. Catan sub-phase) re-arms to avoid spamming. Both fields persist through Redis and are restored on rehydration (`RoomManager.initFromRedis`).
+  - `TURN_TIME_LIMIT_MS` env (`0` disables) wired server → `Room` constructor option.
+  - `STATE_UPDATE` now carries `timer { turnStartedAt, turnTimeLimitMs }` (local + cross-instance via Pub/Sub).
+  - Client `TurnTimer.tsx` renders a live countdown + color-coded bar; integrated into all three rooms; added `TURN_TIMED_OUT`/`TURN_SKIPPED` user feedback.
+  - The forced actions were added to `schemas.ts` whitelists but are **system-initiated only** — clients never send them, preserving the anti-impersonation `playerId` rewrite and `isValidAction` guard.
+- **Tests:** New engine suites (`turn-timer.test.ts` × 3), `schemas.test.ts` additions, `Room.test.ts` timer metadata/reset/auto-forfeit/disabled, `TurnTimer.test.tsx`. Full suite green (323 tests), typecheck + lint clean, server & web-client builds pass.
+- **Status:** ✅ **DONE** (Phase 33 in `PROJECT_TRACKER.md`)
 

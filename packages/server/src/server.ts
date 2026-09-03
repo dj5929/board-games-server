@@ -25,6 +25,7 @@ export const ENGINES: Record<string, IGameEngine<IGameState, IPlayerAction, IGam
 const DEFAULT_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:8080'];
 const HOST = process.env.HOST ?? '0.0.0.0';
 const PORT = Number(process.env.PORT) || 3000;
+const TURN_TIME_LIMIT_MS = Number(process.env.TURN_TIME_LIMIT_MS) || 0;
 const CORS_ORIGINS = (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(','))
   .split(',')
   .map(s => s.trim())
@@ -33,6 +34,7 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(','))
 export const buildApp = (logger: boolean = true) => {
   const fastify = Fastify({ logger });
   roomManager.setLogger({ log: (msg: string) => fastify.log.info(msg) });
+  roomManager.setPubSubLogger({ log: (msg: string) => fastify.log.info(msg) });
 
   fastify.register(cors, { origin: CORS_ORIGINS });
   fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
@@ -70,7 +72,7 @@ export const buildApp = (logger: boolean = true) => {
     const isHotSeat = body.hotSeat === true;
     const room = new Room<IGameState, IPlayerAction, IGameEvent>(
       roomId, gameType, engine, CryptoRandomProvider, playerIds, undefined,
-      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null }
+      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null, turnTimeLimitMs: TURN_TIME_LIMIT_MS }
     );
     roomManager.createRoom(room);
 

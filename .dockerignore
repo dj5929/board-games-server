@@ -10,3 +10,8 @@ packages/*/dist
 **/*.test.ts
 **/*.spec.ts
 packages/*/test
+
+# Never copy environment/secret files into Docker build contexts/images
+.env
+.env.*
+!.env.production.example

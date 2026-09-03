@@ -215,6 +215,7 @@ This single projection is what makes hidden movement work *both* in online mode 
 | `HOST` | `0.0.0.0` | Bind address (must be `0.0.0.0` inside Docker). |
 | `PORT` | `3000` | HTTP + WS port. |
 | `CORS_ORIGIN` | `http://localhost:5173,http://localhost:8080` | **Comma-separated** allowlist for `@fastify/cors`; the client (Vite dev) and the nginx-served container both connect cross-origin. |
+| `TURN_TIME_LIMIT_MS` | `0` (disabled) | Per-room turn timer; when the active player exceeds it the server auto-dispatches the game's forced action (`FORCE_END_TURN`/`SKIP_TURN`). See Phase 33. |
 | `REDIS_URL` | *(unset)* | `ioredis` connection; when unset the server falls back to an in-memory snapshot store (see §6.2). |
 
 ### 5.2 `buildApp()` (`server.ts`)
@@ -472,7 +473,18 @@ Build stage: `npm ci` + `vite build`. Runtime stage: `nginx:alpine` + `dist/`. `
 
 ### `.dockerignore` / `.env.example`
 
-`.dockerignore` keeps `node_modules`, `dist`, `coverage`, git artifacts out of build contexts. `.env.example` documents `PORT`, `HOST`, `CORS_ORIGIN`, `REDIS_URL` for compose.
+`.dockerignore` keeps `node_modules`, `dist`, `coverage`, git artifacts out of build contexts. `.env.example` documents `PORT`, `HOST`, `CORS_ORIGIN`, `REDIS_URL` for compose. `.env.production.example` documents the production-only override vars (`CLIENT_ORIGIN`, `CLIENT_API_URL`, optional `TURN_TIME_LIMIT_MS`).
+
+### Git-push triggered deploy (`deploy.yml`, Phase 34)
+
+`.github/workflows/deploy.yml` re-deploys the live stack to a single VPS on every push to `main` (guarded by a concurrency group so only one deploy runs at a time). It SSHes in via `appleboy/ssh-action` using the `VPS_HOST` / `VPS_USER` / `VPS_SSH_KEY` / `VPS_PORT` secrets and:
+
+1. Shallow-clones/pulls the repo into `/opt/board-game-server` (`git reset --hard origin/main`).
+2. Loads the server-side `.env` (never committed).
+3. Runs `docker compose up -d --build` — rebuilds only changed layers, keeps state in the `redis-data` volume.
+4. Prunes dangling images.
+
+Restriction: this targets **long-running WebSocket + Redis**, so it runs on a VPS/VM running Docker — not on Vercel's stateless serverless platform (which cannot host persistent WebSocket listeners or a long-lived Redis). TLS termination lives in a reverse proxy in front of the containers (see README "Production Deployment").
 
 ---
 

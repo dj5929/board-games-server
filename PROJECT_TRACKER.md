@@ -230,9 +230,7 @@ This document tracks the high-level roadmap, detailed implementation specificati
 
 ---
 
-## 🟡 Active & Remaining Roadmap
-
-### 🟡 Infrastructure & Deployment (Phase 32)
+## 🟢 Infrastructure & Deployment (Phase 32)
 - 🟢 **Containerization:** Containerized the Fastify server and Vite client with multi-stage Dockerfiles and a `docker-compose.yml`.
   - `packages/server/Dockerfile` — Multi-stage (Node 24 alpine): builds the server to `dist/server.js` via `tsc` (compiling referenced `@packages/*` sources), then a slim runtime stage installs prod deps (incl. `tsx`, moved to a prod dep so `tsx dist/server.js` can transpile the `.ts` workspace entry points) and runs the identical command used locally.
   - `packages/web-client/Dockerfile` — Multi-stage: builds the Vite bundle (with `VITE_API_URL` as a build arg) and serves static assets via nginx with an SPA-fallback config.
@@ -241,14 +239,78 @@ This document tracks the high-level roadmap, detailed implementation specificati
 - 🟢 **Env-Driven Configuration:** `packages/server/src/server.ts` now reads `PORT` (default 3000), `HOST` (default `0.0.0.0` for container networking), and `CORS_ORIGIN` (comma-separated allow-list; default `http://localhost:5173,http://localhost:8080`). Verified the preflight `Access-Control-Allow-Origin` reflects the configured origin and rejects untrusted origins.
 - 🟢 **Containerization Verified (live):** Docker engine + compose plugin installed on the dev machine; `docker compose build` builds both images and `docker compose up -d` runs `redis` + `server` + `client`. Verified: client serves on :5173, server API creates rooms on :3000, WebSocket auth + per-player Scotland Yard projection work, CORS allow-list blocks untrusted origins, and room state is persisted to Redis (`redis-cli KEYS room:*`).
 - 🟢 **Crash-Recovery Bug Fixed (found in container test):** `RoomManager.initFromRedis` rehydrated rooms with an empty player list, so `Room`'s constructor threw (`engine.getInitialState([])` → "requires X players") and **no room ever survived a restart**. The `Room` constructor now accepts an optional persisted `initialState` snapshot. Verified live: restart the server container → previously-created rooms rehydrate and remain joinable.
+- 🟢 **Automated VPS Deployment (git-push triggered):** Added `.github/workflows/deploy.yml` — on every push to `main` (or `workflow_dispatch`) it SSHes into the production VPS (via `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`/`VPS_PORT` secrets) and runs `docker compose up -d --build`, with a concurrency guard so only one deploy runs at a time. The workflow shallow-clones/pulls the repo into `/opt/board-game-server`, loads the server-side `.env` (never committed), rebuilds only changed layers, and prunes dangling images. `.env.production.example` documents the production-only overrides (`CLIENT_ORIGIN`, `CLIENT_API_URL`, optional `TURN_TIME_LIMIT_MS`); `.dockerignore` now excludes `.env*` from build contexts. Full local + production deployment flow documented in `README.md` "Production Deployment" and `docs/ARCHITECTURE.md` §9.
 - 🟢 **Persistence `Infinity` Bug Fixed (found in container test):** `JSON.stringify` converts Monopoly's `bankMoney: Infinity` to `null`, so persisted rooms came back with a broken bank. Added `redisReplacer`/`redisReviver` (tagged-`Infinity` streaming) in `RedisStore.ts`; verified the snapshot stores `"__JSON_INFINITY__"` and rehydration restores the real value.
 - 🟢 **Client Build Fix (pre-existing bug):** The production `web-client` build was failing because `EventLogEntry`/`Toast.id` were typed `number` while Phase 31 replaced `Math.random` with `crypto.randomUUID()` (string). Updated the types to `string` in `GameRoom.tsx` / `CatanRoom.tsx` so `tsc -b` passes again.
-- 🔴 **Redis Pub/Sub Adapter:** (Optional) Scalable WebSocket room adapter across multiple server instances (since Redis state is already integrated) — still outstanding.
+- 🟢 **Redis Pub/Sub Adapter:** Added `PubSubManager.ts` — a Redis Pub/Sub adapter enabling scalable WebSocket room broadcasting across multiple server instances. The `RedisStore` now exposes `duplicateClient()` for a dedicated subscriber connection. `Room` publishes `{state, events}` to its per-room Redis channel after every reduce() and delivers remote messages to local connections with per-player projection (re-projected via `getStateForPlayer`, preserving hidden-information guarantees). Subscription lifecycle follows the local connection count: the first local connection subscribes to the room channel, the last removes the subscription. In single-instance mode (no `REDIS_URL`) it remains a no-op so behavior is unchanged. Cross-instance delivery verified with `ioredis-mock` (2-instance publish→deliver, channel isolation, unsubscribe) plus Room-level subscription-lifecycle/remote-delivery/publish tests. Full suite green (297 tests), typecheck, root lint, and server build all pass.
 - 🟢 **Security & Systems Audit:** All open findings from `FINAL_AUDIT.md` have been fully resolved in Phase 31.
 
 ---
 
+## 🟢 Turn Timer / AFK Management (Phase 33)
+- 🟢 **Engine forced-turn actions (pure reducers):** Added game-appropriate timeout actions to each engine, unit-tested in dedicated `turn-timer.test.ts` suites:
+  - Monopoly: `FORCE_END_TURN` — advances to the next active player (skipping bankrupt players) and emits `TURN_TIMED_OUT`; valid regardless of `hasRolled` but blocked while the active player has an unresolved debt.
+  - Catan: `FORCE_END_TURN` — emits `TURN_TIMED_OUT`; **only valid during `MAIN_TURN`** — never during sub-phases (e.g. `ROBBER_PLACEMENT`) or initial placement, which are mandatory and must not be auto-advanced. Cancels any active trade on force-end.
+  - Scotland Yard: `SKIP_TURN` — skips the active player without moving and emits `TURN_SKIPPED`; handles stuck detectives (advances to the next movable player) and ends the game with an Mr X win if all detectives are stuck.
+- 🟢 **Server-side per-room turn timer (`Room.ts`):** Each room tracks `turnStartedAt` (reset on every successful `dispatch`), and a `setInterval` tick (started on first connection, cleared on last/close, `unref()`'d) auto-dispatches the game's forced action once the active turn exceeds `turnTimeLimitMs`. Timeout is enforced only while a game is `IN_PROGRESS`; a rejected force (e.g. Catan sub-phase) re-arms rather than spamming. Both `turnStartedAt` and `turnTimeLimitMs` are persisted via Redis and restored on rehydration.
+- 🟢 **Env-driven limit:** `TURN_TIME_LIMIT_MS` (default `0` = disabled) is read in `server.ts`, passed through `RoomManager` into every new/rehydrated room. Wiring: server → `Room` constructor option → room.
+- 🟢 **STATE_UPDATE broadcasts `timer` metadata:** Every `STATE_UPDATE` now carries `{ turnStartedAt, turnTimeLimitMs }` (local and cross-instance via Pub/Sub) so clients render a live countdown.
+- 🟢 **Client `TurnTimer` component + integration:** New `TurnTimer.tsx` renders a live countdown (mm:ss) with a color-coded bar (blue = opponent, yellow = your turn, red + pulse = <25% left), driven by the server-sent timer metadata; integrated into `GameRoom.tsx` (Monopoly), `CatanRoom.tsx`, and `ScotlandYardRoom.tsx`. Added `TURN_TIMED_OUT`/`TURN_SKIPPED` event feedback across all three clients.
+- 🟢 **Security in schema whitelist:** Added `FORCE_END_TURN` (Monopoly/Catan) and `SKIP_TURN` (Scotland Yard) to the server action schemas. The forced actions are **system-initiated**: clients never send them; the server generates them internally on timeout, so the anti-impersonation `playerId` rewrite and `isValidAction` guard still apply.
+- 🟢 **Verification:** New tests cover engine reducers, server schema whitelisting, Room timer metadata/reset/auto-forfeit/disabled, and the `TurnTimer` component. Full suite green (323 tests), root typecheck + lint clean, server and web-client production builds pass.
+
+---
+
+## 🔄 Performance & Load Optimization (Phase 34) — PLANNED
+
+A codebase-wide performance review was completed. The following high-level optimizations were identified across **game load** (server + engine) and **UI** (web client). They are organized by priority and remain to be implemented.
+
+### 🟡 Batch 1 (COMPLETE): UI Code-Splitting & Bundle Optimization
+- 🟢 **`React.lazy` + `Suspense` (`App.tsx`):** The three game rooms (Monopoly `GameRoom`, `CatanRoom`, `ScotlandYardRoom`) and the `Lobby` are now lazily loaded. A single `<Suspense>` wraps routing with a lightweight `LoadingFallback`. Users only download the game they choose — verified in the production build, where the rooms now emit as separate chunks (`GameRoom` 35 kB, `CatanRoom` 39 kB, `ScotlandYardRoom` 30 kB) instead of one monolithic bundle.
+- 🟢 **Vite `manualChunks` (`vite.config.ts`):** Added a chunk-splitting function. `react`/`react-dom` go to `vendor-react` (224 kB, cached across all games); `react-zoom-pan-pinch` (Scotland Yard only) is isolated; the engine packages are per-room. All game code is code-split from the vendor baseline so Monopoly/Catan users never load the Scotland Yard zoom lib.
+- 🟢 **`Dice3D` CSS extraction (`Dice3D.tsx` + `index.css`):** The static inline `<style>` tag (perspective, dice faces, `@keyframes rolling`) was moved into a single static block in `index.css`, eliminating per-mount style-tag injection and duplicated CSS recalculation. `Dice3D` is now wrapped in `React.memo`.
+- 🟢 **Board component memoization:**
+  - `MonopolyBoard` — wrapped in `React.memo`; the 40-space grid was extracted into a memoized `BoardSpaces` sub-component keyed only on `ownership` + `players` (no full re-render of every cell when only players move).
+  - `CatanBoard` — wrapped in `React.memo`; the `HexPolygon`, `VertexNode`, and `EdgeNode` sub-components are each memoized.
+  - `ScotlandYardBoard` — wrapped in `React.memo`; the fully-static SVG graph (199 nodes + all edges) was extracted into a memoized `StaticGraph` component that never re-renders; player tokens are isolated in a memoized `PlayerTokens` component that only updates when positions/roles change.
+- 🟢 **Verification:** Full web-client suite green (42 tests), root typecheck clean, root lint + web-client lint clean (only pre-existing `exhaustive-deps` warnings remain), and the production `vite build` succeeds with the new code-split chunk layout.
+
+### Server: serialization & broadcast hot-path
+- 🔄 **Deduplicate `JSON.stringify` per action (`Room.ts`:225-243, 278-303):** A single successful `dispatch()` currently serializes the entire game state 6–8 times — once for `saveState()` to Redis (`Room.ts:87`), once per connected player in `broadcastState()` (`Room.ts:285`), plus the raw state again in `pubsub.publish()` (`Room.ts:289`). Plan: serialize once, project only the per-player sentinel/hidden field, and reuse a single JSON string across save + per-player broadcast + pubsub.
+- 🔄 **Debounce / dirty-flag `saveState()` (`Room.ts`:73-88):** No batching exists — every `dispatch`, token issue, and connection event triggers a full state `JSON.stringify` + Redis SET. On room creation (`server.ts:73-81`) the constructor `saveState()` + `issueSessionToken()` cause 2 redundant back-to-back full writes. Plan: mark dirty and coalesce writes; batch token issuance into the first write.
+
+### Server: boot rehydration
+- 🔄 **Replace Redis `KEYS` with `SCAN` (`RedisStore.ts`:58-64):** `redis.keys('room:*')` is O(N) over the entire Redis keyspace and blocks the server. Use `SCAN` for incremental iteration.
+- 🔄 **Parallelize rehydration (`RoomManager.ts`:59-83):** Rooms are rehydrated one `await` at a time (10,000 rooms = 10,000 sequential round-trips). Use `Promise.allSettled` in batches.
+- 🔄 **Remove redundant rehydration write:** Each rehydrated `Room` calls `saveState()` in its constructor (`Room.ts:53`), writing the exact state just read from Redis back. Skip the write on the rehydrate path.
+- 🔄 **Defer rehydration off the critical startup path (`server.ts`:200-201):** Currently rehydration completes before Fastify begins listening, delaying time-to-serve. Load rooms asynchronously / lazily.
+
+### Engine: reduce recomputation
+- 🔄 **Incremental Catan awards (`CatanEngine.ts`:88-159):** `checkWinConditionAndAwards` runs the global longest-road DFS + VP recount + largest-army recount on **every action** (21 call sites), including `TRADE_BANK`/`DISCARD_RESOURCES` that cannot affect roads. Gate it to board-mutating/building/dev-card actions, or track road/army/VP totals incrementally in state.
+- 🔄 **Lazy board cloning (Catan):** `reduce` clones the entire board (19 hexes + 54 vertices + 72 edges) on every action (`CatanEngine.ts`:233-237) even for non-board actions. Use structural sharing / clone-on-mutate.
+- 🔄 **Monopoly guard-before-clone (`MonopolyEngine.ts`:53-72):** Full state is cloned before early-returning guard failures. Clone only after guards pass; precompute static `BOARD_SPACES.filter(colorGroup)` lookups once.
+
+### UI: bundle & code splitting
+- ✅ **DONE (Batch 1)** — `React.lazy` + `Suspense` in `App.tsx` (lines 1-5): all three game rooms (Monopoly, Catan, Scotland Yard) now lazy-load as separate chunks; users only download the game they choose (~60-70% initial-bundle cut).
+- ✅ **DONE (Batch 1)** — Vite `manualChunks` (`vite.config.ts`): engine packages split into vendor chunks and `react-zoom-pan-pinch` (only used by Scotland Yard) isolated out of the Monopoly/Catan bundle.
+
+### UI: rendering & memoization
+- ✅ **DONE (Batch 1)** — Memoized the board components: `ScotlandYardBoard.tsx` (199-node graph + hundreds of SVG edges extracted into a never-re-rendering `StaticGraph`; tokens isolated in memoized `PlayerTokens`), `CatanBoard.tsx` (memoized `HexPolygon`/`VertexNode`/`EdgeNode`), `MonopolyBoard.tsx` (40-space grid extracted into `BoardSpaces` keyed only on ownership + players).
+- 🔄 **Remaining:** Memoize derived data — remove per-render linear scans: `GameRoom.tsx:448-449` (ownership filter + `BOARD_SPACES.find` in render loop), `GameRoom.tsx:322` (event log spread+reverse each render), `MonopolyBoard.tsx:102` (`players.findIndex` × 40 spaces), `CatanRoom.tsx:293-313` (robber victims), `TradeManager.tsx:24-32` (nested find/filter), `CatanTradeManager.tsx:50-64` (port-rate ×5 vertex walks).
+- 🔄 **Remaining:** Batch token DOM work (`PlayerToken.tsx`:34-57): each token runs `querySelector` + `getBoundingClientRect()` (forces layout reflow) and registers its own resize listener — up to 4 per board. Consolidate into one shared measurement in `MonopolyBoard` via a single `ResizeObserver`/`getBoundingClientRect` pass.
+
+### UI: misc cleanup
+- ✅ **DONE (Batch 1)** — Hoisted `Dice3D` `<style>` to `index.css` (`Dice3D.tsx`:61): the static keyframe `<style>` tag is no longer injected on every mount; `Dice3D` is wrapped in `React.memo`.
+- 🔄 **Remaining:** Wire up or delete dead hooks: `useGameSocket.ts`, `useEventLog.ts`, `useToasts.ts` exist but are unused — the three rooms re-implement socket/event-log/toast logic inline. Either adopt them (gaining their `useCallback` memoization) or remove them.
+
+### Recommended implementation order (lowest risk → highest reward)
+1. ✅ **DONE (Batch 1)** — `React.lazy` + `Suspense` + Vite `manualChunks` + board memoization + `Dice3D` CSS extraction.
+2. Deduplicate serialization: one `JSON.stringify` per action reused for save + per-player broadcast, with a dirty/debounce flag on `saveState` (Batch 2).
+3. Rehydration: `SCAN` + parallelize + remove redundant constructor write (Batch 3).
+4. ✅ **DONE (Batch 1)** — Memoize the three boards + derived data and cut per-render scans.
+5. Gate `checkWinConditionAndAwards` to board-mutating actions (Batch 4).
+
+---
+
 ## 🔮 Future Additions (Post-MVP)
-- 🔴 **Turn Timer / AFK Management:** Add a visual countdown timer to enforce active play and auto-kick/bankrupt AFK players.
-- 🔴 **Auctions:** Automatically trigger an auction bidding phase when a player lands on an unowned property and declines to buy it.
 

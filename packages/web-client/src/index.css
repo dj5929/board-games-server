@@ -3,3 +3,28 @@
 body {
   @apply bg-gray-900 text-white font-sans antialiased;
 }
+
+/* Dice3D styles — extracted from inline <style> to avoid per-mount re-injection */
+.dice-container {
+  perspective: 1000px;
+}
+.dice {
+  width: 80px;
+  height: 80px;
+  transform-style: preserve-3d;
+  transition: transform 1s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.dice-rolling {
+  animation: dice-rolling 1.5s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}
+@keyframes dice-rolling {
+  0% { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
+  50% { transform: rotateX(720deg) rotateY(360deg) rotateZ(180deg); }
+  100% { transform: var(--final-transform); }
+}
+.face-1 { transform: translateZ(40px); }
+.face-2 { transform: rotateX(90deg) translateZ(40px); }
+.face-3 { transform: rotateY(90deg) translateZ(40px); }
+.face-4 { transform: rotateY(-90deg) translateZ(40px); }
+.face-5 { transform: rotateX(-90deg) translateZ(40px); }
+.face-6 { transform: rotateX(180deg) translateZ(40px); }

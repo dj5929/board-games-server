@@ -8,6 +8,7 @@ describe('monopolyActionSchema', () => {
     const validActions = [
       { type: 'ROLL_DICE' },
       { type: 'END_TURN' },
+      { type: 'FORCE_END_TURN' },
       { type: 'BUY_PROPERTY' },
       { type: 'PAY_JAIL_FINE' },
       { type: 'USE_JAIL_CARD' },
@@ -58,6 +59,7 @@ describe('catanActionSchema', () => {
     const validActions = [
       { type: 'ROLL_DICE' },
       { type: 'END_TURN' },
+      { type: 'FORCE_END_TURN' },
       { type: 'BUILD_SETTLEMENT', vertexId: 'v1' },
       { type: 'BUILD_ROAD', edgeId: 'e1' },
       { type: 'UPGRADE_CITY', vertexId: 'v1' },
@@ -114,6 +116,11 @@ describe('scotlandYardActionSchema', () => {
       payload: { move1: { targetNode: 5, ticketType: 'taxi' }, move2: { targetNode: 7, ticketType: 'bus' } }
     });
     expect(parsed.type).toBe('DOUBLE_MOVE');
+  });
+
+  it('parses a valid skip turn action', () => {
+    const parsed = scotlandYardActionSchema.parse({ ...base, type: 'SKIP_TURN' });
+    expect(parsed.type).toBe('SKIP_TURN');
   });
 
   it('rejects malformed payloads', () => {

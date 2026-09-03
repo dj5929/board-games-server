@@ -3,6 +3,7 @@ import type { ScotlandYardState, TransportType, PlayerRole } from '@packages/sco
 import { deduceTicketForMove } from '@packages/scotland-yard-engine';
 import { ScotlandYardBoard } from './ScotlandYardBoard';
 import { SoundEngine } from '../utils/SoundEngine';
+import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -22,6 +23,8 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave
   const [isDoubleMoveActive, setIsDoubleMoveActive] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<TransportType | 'auto'>('auto');
   const [gameOver, setGameOver] = useState<{ winner: PlayerRole; reason: string } | null>(null);
+  const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
+  const [skipNotice, setSkipNotice] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -32,7 +35,10 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'STATE_UPDATE') {
-        if (isActive) setState(data.state);
+        if (isActive) {
+          setTurnTimer(data.timer);
+          setState(data.state);
+        }
       } else if (data.type === 'ACTION_REJECTED') {
         alert('Action Rejected: ' + data.reason);
       } else if (data.type === 'EVENTS') {
@@ -40,6 +46,9 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave
         for (const ev of data.events) {
           if (ev.type === 'PLAYER_MOVED') {
              SoundEngine.playTransitSound(ev.payload.ticketType);
+          } else if (ev.type === 'TURN_SKIPPED') {
+             setSkipNotice(`${ev.payload.playerId} ran out of time. Turn passed to ${ev.payload.nextPlayerId}.`);
+             window.setTimeout(() => setSkipNotice(''), 4000);
           } else if (ev.type === 'GAME_OVER') {
              setGameOver({ winner: ev.payload.winner, reason: ev.payload.reason });
              if (ev.payload.winner === 'DETECTIVE') {
@@ -152,7 +161,15 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave
       <div className="w-full max-w-[95vw] h-[calc(100dvh-1.5rem)] flex gap-4 overflow-hidden">
       {/* Sidebar: Turn info & Tickets */}
       <div className="w-96 min-w-96 shrink-0 bg-gray-800 rounded-2xl p-4 flex flex-col shadow-xl border border-gray-700 overflow-y-auto">
-         <h2 className="text-xl font-bold mb-2 border-b border-gray-700 pb-2">Turn {state.currentTurn}</h2>
+         <div className="flex items-center justify-between mb-2 border-b border-gray-700 pb-2">
+           <h2 className="text-xl font-bold">Turn {state.currentTurn}</h2>
+           <TurnTimer timer={turnTimer} isMyTurn={!!isLocalActive} />
+         </div>
+         {skipNotice && (
+           <div className="mb-3 text-sm text-red-300 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
+             {skipNotice}
+           </div>
+         )}
          <div className="mb-4">
            <span className="text-sm text-gray-400">Current Player:</span>
            <div className={`text-lg font-bold ${activePlayer?.role === 'MR_X' ? 'text-gray-200' : 'text-blue-400'}`}>

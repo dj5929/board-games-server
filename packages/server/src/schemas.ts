@@ -8,6 +8,7 @@ const nonnegativeInt = z.number().int().nonnegative();
 export const monopolyActionSchema = z.discriminatedUnion('type', [
   z.object({ ...baseAction, type: z.literal('ROLL_DICE') }),
   z.object({ ...baseAction, type: z.literal('END_TURN') }),
+  z.object({ ...baseAction, type: z.literal('FORCE_END_TURN') }),
   z.object({ ...baseAction, type: z.literal('BUY_PROPERTY') }),
   z.object({ ...baseAction, type: z.literal('PAY_JAIL_FINE') }),
   z.object({ ...baseAction, type: z.literal('USE_JAIL_CARD') }),
@@ -51,6 +52,7 @@ export const catanActionSchema = z.discriminatedUnion('type', [
   z.object({ ...baseAction, type: z.literal('CANCEL_TRADE') }),
   z.object({ ...baseAction, type: z.literal('ROLL_DICE') }),
   z.object({ ...baseAction, type: z.literal('END_TURN') }),
+  z.object({ ...baseAction, type: z.literal('FORCE_END_TURN') }),
 ]);
 
 export const scotlandYardActionSchema = z.discriminatedUnion('type', [
@@ -59,6 +61,7 @@ export const scotlandYardActionSchema = z.discriminatedUnion('type', [
     move1: z.object({ targetNode: z.number(), ticketType: z.string() }),
     move2: z.object({ targetNode: z.number(), ticketType: z.string() })
   }) }),
+  z.object({ ...baseAction, type: z.literal('SKIP_TURN') }),
 ]);
 
 export const actionSchemaByGame: Record<GameType, z.ZodType> = {

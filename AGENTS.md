@@ -1,6 +1,6 @@
 # Universal Multiplayer Board Game Platform (Agent Rules)
 
-**Current Focus:** Remaining Roadmap — Infrastructure & Deployment (Phase 32: Containerization; Phase 31 Redis persistence & server hardening completed)
+**Current Focus:** Performance & Load Optimization (Phase 34) — Batch 1 (UI code-splitting, Vite `manualChunks`, board memoization, `Dice3D` CSS extraction) completed; Batches 2–4 (server serialization dedup, Redis rehydration, engine incremental recomputation) remaining. Prior phases complete: 32 Containerization (incl. an automated git-push-triggered VPS deploy via `.github/workflows/deploy.yml` — see README "Production Deployment" / PROJECT_TRACKER Phase 32), 33 Turn Timer / AFK Management, 31 Redis persistence & server hardening.
 **Tracker:** See [PROJECT_TRACKER.md](./PROJECT_TRACKER.md) for roadmap and status.
 **Fixes:** See [FIXES.md](./FIXES.md) for identified issues, planned improvements, and implementation diffs.
 **Audits:** The consolidated security & systems audit is [FINAL_AUDIT.md](./FINAL_AUDIT.md). All 18 findings cataloged across the codebase have now been verified and fully fixed in Phase 31.

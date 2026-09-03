@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.github/workflows/
 coverage/
 *.log
 .env
