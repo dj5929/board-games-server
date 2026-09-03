@@ -1,7 +1,7 @@
-import React, { memo } from 'react';
+import React, { memo, useRef, useState, useEffect } from 'react';
 import type { IMonopolyState } from '@packages/monopoly-engine';
 import { BOARD_SPACES } from '@packages/monopoly-engine';
-import { PlayerToken } from './PlayerToken';
+import { PlayerToken, type SpaceCoords } from './PlayerToken';
 
 interface Props {
   state: IMonopolyState;
@@ -67,13 +67,21 @@ function getGridPosition(index: number): { gridColumn: number, gridRow: number }
 }
 
 const BoardSpaces = memo(function BoardSpaces({ ownership, players }: { ownership: IMonopolyState['ownership']; players: IMonopolyState['players'] }) {
+  // Precompute playerId -> color index once so the 40-space loop does O(1)
+  // lookups instead of a linear players.findIndex per space.
+  const playerColorIndex = React.useMemo(() => {
+    const map = new Map<string, number>();
+    players.forEach((p, i) => map.set(p.id, i));
+    return map;
+  }, [players]);
+
   return (
     <>
       {BOARD_SPACES.map((space, index) => {
         const { gridColumn, gridRow } = getGridPosition(index);
         const colorClass = PROPERTY_COLORS[space.id];
         const ownerId = ownership[space.id];
-        const ownerIndex = players.findIndex(p => p.id === ownerId);
+        const ownerIndex = ownerId ? playerColorIndex.get(ownerId) ?? -1 : -1;
         const ownerColor = ownerIndex !== -1 ? PLAYER_COLORS[ownerIndex % PLAYER_COLORS.length] : null;
 
         const isCorner = index % 10 === 0;
@@ -122,15 +130,55 @@ const BoardSpaces = memo(function BoardSpaces({ ownership, players }: { ownershi
 });
 
 export const MonopolyBoard = memo(function MonopolyBoard({ state, children }: Props) {
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [spaceCoords, setSpaceCoords] = useState<SpaceCoords | null>(null);
+
+  // Single shared measurement pass for all 40 spaces: one ResizeObserver + one
+  // getBoundingClientRect sweep, instead of every PlayerToken running its own
+  // querySelector + getBoundingClientRect (which forced repeated layout reflows)
+  // and registering its own resize listener (up to 4 listeners on the board).
+  useEffect(() => {
+    const measure = () => {
+      const boardEl = boardRef.current;
+      if (!boardEl) return;
+      const boardRect = boardEl.getBoundingClientRect();
+      const coords: SpaceCoords = {};
+      for (let i = 0; i < 40; i++) {
+        const spaceEl = boardEl.querySelector(`[data-space-index="${i}"]`);
+        if (!spaceEl) continue;
+        const r = spaceEl.getBoundingClientRect();
+        coords[i] = {
+          x: r.left - boardRect.left + r.width / 2,
+          y: r.top - boardRect.top + r.height / 2
+        };
+      }
+      setSpaceCoords(coords);
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+    const ro = new ResizeObserver(measure);
+    if (boardRef.current) ro.observe(boardRef.current);
+    // Small delay on initial mount to ensure layout is done
+    const timer = setTimeout(measure, 100);
+
+    return () => {
+      window.removeEventListener('resize', measure);
+      ro.disconnect();
+      clearTimeout(timer);
+    };
+  }, []);
+
   return (
     <div className="w-full">
-      <div className="w-full max-w-6xl aspect-square bg-green-50 p-1 md:p-2 rounded-xl shadow-2xl border-4 border-gray-900 relative mx-auto" id="board-container">
+      <div ref={boardRef} className="w-full max-w-6xl aspect-square bg-green-50 p-1 md:p-2 rounded-xl shadow-2xl border-4 border-gray-900 relative mx-auto" id="board-container">
         {state.players.map((p, i) => (
           <PlayerToken 
             key={p.id} 
             playerId={p.id} 
             playerIndex={i} 
             targetPosition={p.position} 
+            spaceCoords={spaceCoords} 
           />
         ))}
       <div 

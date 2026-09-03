@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { IMonopolyState } from '@packages/monopoly-engine';
 import { BOARD_SPACES } from '@packages/monopoly-engine';
 import type { PropertyId } from '@packages/engine-core';
@@ -21,11 +21,23 @@ export function TradeManager({ state, activePlayerId, onProposeTrade, onCancel }
   const activePlayer = state.players.find(p => p.id === activePlayerId)!;
   const targetPlayer = state.players.find(p => p.id === targetPlayerId);
 
+  // Precompute which color groups have any buildings so isTradable is an O(1)
+  // map lookup instead of filtering BOARD_SPACES on every property.
+  const colorGroupsWithBuildings = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const [id, count] of Object.entries(state.buildings)) {
+      if ((count || 0) > 0) {
+        const space = BOARD_SPACES.find(s => s.id === id);
+        if (space?.colorGroup) map.set(space.colorGroup, true);
+      }
+    }
+    return map;
+  }, [state.buildings]);
+
   const isTradable = (propId: string) => {
     const space = BOARD_SPACES.find(s => s.id === propId);
     if (!space || !space.colorGroup) return true;
-    const groupSpaces = BOARD_SPACES.filter(s => s.colorGroup === space.colorGroup);
-    return !groupSpaces.some(s => (state.buildings[s.id] || 0) > 0);
+    return !colorGroupsWithBuildings.get(space.colorGroup);
   };
 
   const myProperties = Object.keys(state.ownership).filter(id => state.ownership[id as PropertyId] === activePlayerId && isTradable(id));

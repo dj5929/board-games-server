@@ -261,9 +261,9 @@ This document tracks the high-level roadmap, detailed implementation specificati
 
 ---
 
-## 🔄 Performance & Load Optimization (Phase 34) — PLANNED
+## 🟢 Performance & Load Optimization (Phase 34)
 
-A codebase-wide performance review was completed. The following high-level optimizations were identified across **game load** (server + engine) and **UI** (web client). They are organized by priority and remain to be implemented.
+A codebase-wide performance review was completed and all identified optimizations across **game load** (server + engine) and **UI** (web client) have been implemented across five batches: UI code-splitting + board memoization (Batch 1), server serialization dedup + immersive save coalescing (Batch 2), Redis rehydration (SCAN/batched/parallel/deferred, Batch 3), engine incremental recomputation (Batch 4), and UI derived-data memoization + batched token DOM + dead-hook resolution (Batch 5).
 
 ### 🟡 Batch 1 (COMPLETE): UI Code-Splitting & Bundle Optimization
 - 🟢 **`React.lazy` + `Suspense` (`App.tsx`):** The three game rooms (Monopoly `GameRoom`, `CatanRoom`, `ScotlandYardRoom`) and the `Lobby` are now lazily loaded. A single `<Suspense>` wraps routing with a lightweight `LoadingFallback`. Users only download the game they choose — verified in the production build, where the rooms now emit as separate chunks (`GameRoom` 35 kB, `CatanRoom` 39 kB, `ScotlandYardRoom` 30 kB) instead of one monolithic bundle.
@@ -299,12 +299,17 @@ A codebase-wide performance review was completed. The following high-level optim
 
 ### UI: rendering & memoization
 - ✅ **DONE (Batch 1)** — Memoized the board components: `ScotlandYardBoard.tsx` (199-node graph + hundreds of SVG edges extracted into a never-re-rendering `StaticGraph`; tokens isolated in memoized `PlayerTokens`), `CatanBoard.tsx` (memoized `HexPolygon`/`VertexNode`/`EdgeNode`), `MonopolyBoard.tsx` (40-space grid extracted into `BoardSpaces` keyed only on ownership + players).
-- 🔄 **Remaining:** Memoize derived data — remove per-render linear scans: `GameRoom.tsx:448-449` (ownership filter + `BOARD_SPACES.find` in render loop), `GameRoom.tsx:322` (event log spread+reverse each render), `MonopolyBoard.tsx:102` (`players.findIndex` × 40 spaces), `CatanRoom.tsx:293-313` (robber victims), `TradeManager.tsx:24-32` (nested find/filter), `CatanTradeManager.tsx:50-64` (port-rate ×5 vertex walks).
-- 🔄 **Remaining:** Batch token DOM work (`PlayerToken.tsx`:34-57): each token runs `querySelector` + `getBoundingClientRect()` (forces layout reflow) and registers its own resize listener — up to 4 per board. Consolidate into one shared measurement in `MonopolyBoard` via a single `ResizeObserver`/`getBoundingClientRect` pass.
+- ✅ **DONE (Batch 5)** — Memoized derived data, removing per-render linear scans:
+  - `GameRoom.tsx` — the active player's owned-property list (was `ownership` filter + `BOARD_SPACES.find` per property each render) is now a `useMemo` keyed on `ownership` + `activePlayerId`; the event log `[...eventLog].reverse()` is computed once per log change via `useMemo`.
+  - `CatanRoom.tsx` — robber victims (was a per-render vertex scan while the modal was open) is a `useMemo` keyed on `robberHexId`/`state`/`activePlayerId`; reversed event log memoized.
+  - `MonopolyBoard.tsx` — the 40-space render loop's per-space `players.findIndex` replaced with a precomputed `playerId → color index` `Map` (`useMemo`).
+  - `TradeManager.tsx` — the per-property `BOARD_SPACES.filter(colorGroup)` + building-check replaced with a precomputed "color groups with buildings" `Map`, so `isTradable` is an O(1) lookup.
+  - `CatanTradeManager.tsx` — the bank exchange rate is computed once per board/player via `useMemo` (single vertex walk) instead of one full vertex walk per resource per render (`getBankExchangeRate` is now an O(1) map lookup).
+- ✅ **DONE (Batch 5)** — Batched token DOM work: `MonopolyBoard` now does a single shared measurement pass (one `ResizeObserver` on the board container + one `getBoundingClientRect` sweep of all 40 spaces) and passes a `spaceCoords` map down; `PlayerToken` no longer queries the DOM, calls `getBoundingClientRect`, or registers its own (up to 4) resize listeners — it just reads its space's coordinates and applies its index offset.
 
 ### UI: misc cleanup
 - ✅ **DONE (Batch 1)** — Hoisted `Dice3D` `<style>` to `index.css` (`Dice3D.tsx`:61): the static keyframe `<style>` tag is no longer injected on every mount; `Dice3D` is wrapped in `React.memo`.
-- 🔄 **Remaining:** Wire up or delete dead hooks: `useGameSocket.ts`, `useEventLog.ts`, `useToasts.ts` exist but are unused — the three rooms re-implement socket/event-log/toast logic inline. Either adopt them (gaining their `useCallback` memoization) or remove them.
+- ✅ **DONE (Batch 5)** — Dead hooks resolved: `useToasts.ts` is now adopted by both `GameRoom` and `CatanRoom` (its `{ toasts, addToast }` interface matches their inline toast handling exactly, de-duplicating the identical logic), and the non-matching `useGameSocket.ts` / `useEventLog.ts` hooks (whose interfaces don't line up with the rooms' bespoke socket/event-log logic) were **deleted** along with their now-orphaned tests.
 
 ### Recommended implementation order (lowest risk → highest reward)
 1. ✅ **DONE (Batch 1)** — `React.lazy` + `Suspense` + Vite `manualChunks` + board memoization + `Dice3D` CSS extraction.
@@ -312,6 +317,7 @@ A codebase-wide performance review was completed. The following high-level optim
 3. ✅ **DONE (Batch 3)** — Rehydration: `SCAN` + parallelize in batches + skip redundant constructor write + defer off critical startup path.
 4. ✅ **DONE (Batch 1)** — Memoize the three boards + derived data and cut per-render scans.
 5. ✅ **DONE (Batch 4)** — Engine recomputation: gate Catan `checkWinConditionAndAwards` to VP-affecting actions, lazy Catan board clone-on-mutate, and Monopoly guard-before-clone.
+6. ✅ **DONE (Batch 5)** — UI derived-data memoization (`GameRoom`/`CatanRoom`/`MonopolyBoard`/`TradeManager`/`CatanTradeManager`), single shared token measurement pass in `MonopolyBoard`, and dead-hook resolution (adopt `useToasts`, delete `useGameSocket` + `useEventLog`).
 
 ---
 

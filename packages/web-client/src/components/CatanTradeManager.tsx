@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { boardGraph, type ICatanState, type ResourceType } from '@packages/catan-engine';
 import type { PlayerId } from '@packages/engine-core';
 
@@ -47,20 +47,29 @@ export function CatanTradeManager({ state, playerId, onTradeBank, onProposeTrade
     }
   };
 
+  // Precompute each resource's best bank exchange rate in a single vertex walk
+  // (instead of one full walk per resource on every render) so rate lookups are O(1).
+  const portRates = useMemo(() => {
+    const best: Record<string, number> = {};
+    Object.values(state.board.vertices).forEach(vertex => {
+      if (vertex.owner !== playerId || !vertex.building) return;
+      const edges = boardGraph.vertices[vertex.id]?.adjacentEdges || [];
+      edges.forEach((eId: string) => {
+        const port = state.board.edges[eId]?.port;
+        for (const resource of RESOURCES) {
+          if (port === '3:1') best[resource] = Math.min(best[resource] ?? 4, 3);
+          if (port === resource) best[resource] = Math.min(best[resource] ?? 4, 2);
+        }
+      });
+    });
+    const rates = new Map<ResourceType, number>();
+    for (const resource of RESOURCES) rates.set(resource, best[resource] ?? 4);
+    return rates;
+  }, [state.board, playerId]);
+
   const getBankExchangeRate = (resource: ResourceType) => {
     if (resource === 'DESERT') return 4;
-    let bestRate = 4;
-    Object.values(state.board.vertices).forEach(vertex => {
-      if (vertex.owner === playerId && vertex.building) {
-        const edges = boardGraph.vertices[vertex.id]?.adjacentEdges || [];
-        edges.forEach((eId: string) => {
-          const port = state.board.edges[eId]?.port;
-          if (port === '3:1') bestRate = Math.min(bestRate, 3);
-          if (port === resource) bestRate = Math.min(bestRate, 2);
-        });
-      }
-    });
-    return bestRate;
+    return portRates.get(resource) ?? 4;
   };
 
   return (

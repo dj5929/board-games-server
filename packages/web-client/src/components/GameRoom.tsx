@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import type { IMonopolyState } from '@packages/monopoly-engine';
 import { BOARD_SPACES } from '@packages/monopoly-engine';
 import { MonopolyBoard } from './MonopolyBoard';
@@ -9,6 +9,7 @@ import { SoundEngine } from '../utils/SoundEngine';
 import { Dice3D } from './Dice3D';
 import { RulebookModal } from './RulebookModal';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
+import { useToasts } from '../hooks/useToasts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -20,11 +21,6 @@ interface Props {
   onLeave: () => void;
 }
 
-interface Toast {
-  id: string;
-  msg: string;
-}
-
 interface EventLogEntry {
   id: string;
   time: string;
@@ -34,7 +30,7 @@ interface EventLogEntry {
 export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
   const [state, setState] = useState<IMonopolyState | null>(null);
   const [error, setError] = useState('');
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, addToast } = useToasts();
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [drawnCard, setDrawnCard] = useState<{ deck: 'CHANCE' | 'CHEST', text: string } | null>(null);
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
@@ -48,14 +44,6 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
   const wsRef = useRef<WebSocket | null>(null);
   const pendingStateRef = useRef<IMonopolyState | null>(null);
   const stateTimerRef = useRef<number | null>(null);
-
-  const addToast = (msg: string) => {
-    const id = crypto.randomUUID();
-    setToasts(prev => [...prev, { id, msg }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
-  };
 
   useEffect(() => {
     let isActive = true;
@@ -178,6 +166,18 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
 
   // Use the active player's ID for all dispatched actions when it's our turn
   const activePlayerId = state ? state.players[state.currentPlayerIndex].id : '';
+
+  // Derived data memoized so renders don't re-scan ownership / re-find spaces.
+  // Active player's owned property cards:
+  const myPropertyList = useMemo(() => {
+    if (!state?.ownership) return [];
+    return Object.entries(state.ownership)
+      .filter(([, ownerId]) => ownerId === activePlayerId)
+      .map(([propId]) => ({ propId, name: BOARD_SPACES.find(s => s.id === propId)?.name }));
+  }, [state?.ownership, activePlayerId]);
+
+  // Event log is stored oldest-first; reverse once per log change for display.
+  const reversedEventLog = useMemo(() => [...eventLog].reverse(), [eventLog]);
 
   const handleRollDice = () => {
     wsRef.current?.send(JSON.stringify({ type: 'ROLL_DICE', playerId: activePlayerId }));
@@ -316,10 +316,10 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
             <button onClick={() => setShowEventLog(false)} className="text-gray-400 hover:text-white text-xl leading-none">&times;</button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-2 flex flex-col-reverse">
-            {eventLog.length === 0 ? (
+            {reversedEventLog.length === 0 ? (
               <p className="text-gray-500 text-sm text-center my-4">No events yet.</p>
             ) : (
-              [...eventLog].reverse().map(ev => (
+              reversedEventLog.map(ev => (
                 <div key={ev.id} className="text-sm border-b border-gray-800 pb-2">
                   <span className="text-gray-500 text-xs mr-2">[{ev.time}]</span>
                   <span className="text-gray-300">{ev.msg}</span>
@@ -445,8 +445,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
                 {/* Active Player Properties */}
                 <div className="mt-4 max-w-sm mx-auto">
                    <div className="flex flex-wrap justify-center gap-1.5">
-                     {Object.entries(state.ownership).filter(([, ownerId]) => ownerId === activePlayer.id).map(([propId]) => {
-                       const space = BOARD_SPACES.find(s => s.id === propId);
+                     {myPropertyList.map(({ propId, name }) => {
                        const isSelected = selectedPropertyId === propId;
                        return (
                          <button 
@@ -458,7 +457,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
                                : 'bg-purple-900/60 border-purple-500/40 text-purple-100 hover:bg-purple-800'
                            }`}
                          >
-                           {space?.name}
+                           {name}
                          </button>
                        );
                      })}

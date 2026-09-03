@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import type { ICatanState, ResourceType, CatanPlayer } from '@packages/catan-engine';
 import type { PlayerId } from '@packages/engine-core';
 import { CatanTradeManager } from './CatanTradeManager';
@@ -10,6 +10,7 @@ import { CatanDiscardModal } from './CatanDiscardModal';
 import { CatanRobberVictimModal } from './CatanRobberVictimModal';
 import { CatanDevCardManager } from './CatanDevCardManager';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
+import { useToasts } from '../hooks/useToasts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -21,11 +22,6 @@ interface Props {
   onLeave: () => void;
 }
 
-interface Toast {
-  id: string;
-  msg: string;
-}
-
 interface EventLogEntry {
   id: string;
   time: string;
@@ -35,7 +31,7 @@ interface EventLogEntry {
 export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
   const [state, setState] = useState<ICatanState | null>(null);
   const [error, setError] = useState('');
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, addToast } = useToasts();
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const [showEventLog, setShowEventLog] = useState(false);
   const [diceRoll, setDiceRoll] = useState<{dice1: number, dice2: number} | null>(null);
@@ -51,13 +47,26 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
   const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
 
-  const addToast = (msg: string) => {
-    const id = crypto.randomUUID();
-    setToasts(prev => [...prev, { id, msg }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
-  };
+  // Event log is stored oldest-first; reverse once per log change for display.
+  const reversedEventLog = useMemo(() => [...eventLog].reverse(), [eventLog]);
+
+  const activePlayerId = state?.activePlayerId || '';
+  const isMyTurn = localPlayerIds.includes(activePlayerId);
+
+  // Victims for the Robber Victim Modal — recomputed only when the target hex or
+  // the board changes, not on every unrelated render.
+  const robberVictims = useMemo<CatanPlayer[]>(() => {
+    if (!robberHexId || !state) return [];
+    const adjacentVertexIds = Object.keys(state.board.vertices).filter(vId => vId.includes(robberHexId));
+    const adjacentOwners = new Set<string>();
+    adjacentVertexIds.forEach(vId => {
+      const v = state.board.vertices[vId];
+      if (v?.building && v.owner && v.owner !== activePlayerId) adjacentOwners.add(v.owner);
+    });
+    return state.players.filter(p =>
+      adjacentOwners.has(p.id) && Object.values(p.resources).reduce((a, b) => a + b, 0) > 0
+    );
+  }, [robberHexId, state, activePlayerId]);
 
   useEffect(() => {
     let isActive = true;
@@ -155,9 +164,6 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
       ws.close();
     };
   }, [roomId, localPlayerIds]);
-
-  const activePlayerId = state?.activePlayerId || '';
-  const isMyTurn = localPlayerIds.includes(activePlayerId);
 
   const isPlacementPhase = state?.turnPhase === 'INITIAL_PLACEMENT_1' || state?.turnPhase === 'INITIAL_PLACEMENT_2';
   const placementBuildMode = isPlacementPhase
@@ -289,29 +295,6 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
   const activePlayer = state.players.find(p => p.id === activePlayerId);
   const me = state.players.find(p => p.id === localPlayerIds[0]);
 
-  // Compute victims for Robber Victim Modal
-  let robberVictims: CatanPlayer[] = [];
-  if (robberHexId) {
-    const adjacentVertexIds = Object.keys(state.board.vertices).filter(vId => {
-      // Very naive logic to get adjacent vertices: in Catan engine, board graph isn't easily accessible here
-      // Wait, we can't access boardGraph from UI. 
-      // Instead, we can just look at all vertices whose ID contains the hex Q and R coordinates.
-      // But the engine validates it anyway. For UI, let's just show players who have ANY building and are not the active player, 
-      // or we can parse the vertex ID. In Catan, vertex ID is something like `q,r|q,r|q,r`.
-      return vId.includes(robberHexId);
-    });
-    const adjacentOwners = new Set<string>();
-    adjacentVertexIds.forEach(vId => {
-      const v = state.board.vertices[vId];
-      if (v?.building && v.owner && v.owner !== activePlayerId) {
-        adjacentOwners.add(v.owner);
-      }
-    });
-    robberVictims = state.players.filter(p => 
-      adjacentOwners.has(p.id) && Object.values(p.resources).reduce((a, b) => a + b, 0) > 0
-    );
-  }
-
   // Check if I need to discard
   const discardingPlayer = discardingPlayerId ? state.players.find(p => p.id === discardingPlayerId) : undefined;
   const myPendingDiscards = discardingPlayerId ? (state.pendingDiscards[discardingPlayerId] || 0) : 0;
@@ -406,10 +389,10 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
             <button onClick={() => setShowEventLog(false)} className="text-gray-400 hover:text-white text-xl leading-none">&times;</button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-2 flex flex-col-reverse">
-            {eventLog.length === 0 ? (
+            {reversedEventLog.length === 0 ? (
               <p className="text-gray-500 text-sm text-center my-4">No events yet.</p>
             ) : (
-              [...eventLog].reverse().map(ev => (
+              reversedEventLog.map(ev => (
                 <div key={ev.id} className="text-sm border-b border-gray-800 pb-2">
                   <span className="text-gray-500 text-xs mr-2">[{ev.time}]</span>
                   <span className="text-gray-300">{ev.msg}</span>
