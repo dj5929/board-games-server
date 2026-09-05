@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { RoomManager } from '../src/RoomManager';
 import { Room } from '../src/Room';
 import { BotController } from '../src/BotController';
-import { MonopolyBot, ScotlandYardBot } from '@packages/ai';
+import { CatanBot, MonopolyBot, ScotlandYardBot } from '@packages/ai';
+import { CatanEngine } from '@packages/catan-engine';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
 
@@ -85,6 +86,66 @@ describe('Bot gameplay', () => {
     const state = room.getState() as any;
     expect(state.activePlayerId).toBe('p2');
     expect(state.mrXLog.length).toBe(2);
+
+    manager.stopCleanup();
+  });
+
+  it('a bot-vs-bot Catan game completes initial placement and keeps the turn loop alive', () => {
+    const manager = new RoomManager();
+    const room = new Room('catan-bots', 'catan', CatanEngine as any, makeRng(), ['p1', 'p2', 'p3'], undefined, {
+      botSeats: ['p1', 'p2', 'p3']
+    });
+    manager.createRoom(room);
+
+    const controller = new BotController(manager);
+    controller.registerStrategy('catan', new CatanBot() as any);
+
+    // Catan starts IN_PROGRESS in initial placement 1 with the first player active.
+    let state = room.getState() as any;
+    expect(state.status).toBe('IN_PROGRESS');
+    expect(state.turnPhase).toBe('INITIAL_PLACEMENT_1');
+    expect(state.activePlayerId).toBe('p1');
+
+// Initial placement: 3 players × 2 rounds × (settlement + road) = 12 actions.
+    // Every placement must be mechanically legal (distance rule / road contact),
+    // so the controller advances one action per tick without a single skip.
+    for (let i = 0; i < 12; i++) {
+      controller.tick();
+    }
+    state = room.getState() as any;
+    expect(state.turnPhase).toBe('MAIN_TURN');
+    // The round-2 starter (last phase-1 player) takes the first main turn.
+    expect(state.activePlayerId).toBe('p3');
+    expect(Object.values(state.board.vertices).filter((v: any) => v.owner).length).toBe(6);
+    expect(Object.values(state.board.edges).filter((e: any) => e.owner).length).toBe(6);
+    for (const p of state.players) {
+      expect(p.resources).toEqual({ WOOD: 0, BRICK: 0, SHEEP: 0, WHEAT: 0, ORE: 0 });
+    }
+
+    // First MAIN_TURN: p3 rolls (deterministic total 4), then eventually ends its
+    // turn — it may buy a cheap dev card first if the roll put resources in hand.
+    controller.tick();
+    expect((room.getState() as any).activePlayerId).toBe('p3');
+    expect((room.getState() as any).hasRolled).toBe(true);
+
+    let guard = 0;
+    while ((room.getState() as any).activePlayerId === 'p3' && guard < 10) {
+      controller.tick();
+      guard++;
+    }
+    expect((room.getState() as any).activePlayerId).not.toBe('p3');
+
+    // Over many more ticks the active seat keeps rotating through all three
+    // bots — no player ever stalls (a stalled Catan bot would pin the loop).
+    const seen: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      controller.tick();
+      const id = (room.getState() as any).activePlayerId;
+      if (!seen.includes(id)) seen.push(id);
+    }
+    expect(seen).toContain('p1');
+    expect(seen).toContain('p2');
+    expect(seen).toContain('p3');
 
     manager.stopCleanup();
   });
