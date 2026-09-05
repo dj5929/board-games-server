@@ -233,8 +233,12 @@ describe('Room', () => {
 
     vi.useFakeTimers();
     try {
+      // A real first roll moves the game from LOBBY to IN_PROGRESS (regression:
+      // LOW-9 left Monopoly in LOBBY forever, silently disabling the AFK timer).
+      room.dispatch({ type: 'ROLL_DICE', playerId: 'p1' } as any);
+      expect((room.getState() as any).status).toBe('IN_PROGRESS');
+
       vi.setSystemTime(room.turnStartedAt + 11000);
-      (room.getState() as any).status = 'IN_PROGRESS';
       (room as any).checkTurnTimeout();
 
       // The forced turn should advance to p2
@@ -259,8 +263,9 @@ describe('Room', () => {
 
     vi.useFakeTimers();
     try {
+      room.dispatch({ type: 'ROLL_DICE', playerId: 'p1' } as any);
+      expect((room.getState() as any).status).toBe('IN_PROGRESS');
       vi.setSystemTime(room.turnStartedAt + 60000);
-      (room.getState() as any).status = 'IN_PROGRESS';
       (room as any).checkTurnTimeout();
       expect((room.getState() as any).currentPlayerIndex).toBe(0);
     } finally {

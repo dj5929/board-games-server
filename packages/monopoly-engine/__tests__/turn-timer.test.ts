@@ -70,6 +70,35 @@ describe('MonopolyEngine - FORCE_END_TURN (turn timer)', () => {
     });
   });
 
+  it('moves LOBBY → IN_PROGRESS on the first successful action (so the server turn timer runs)', () => {
+    const state = initState();
+    expect(MonopolyEngine.isValidAction(state, { type: 'FORCE_END_TURN', playerId: p1 })).toBe(true);
+
+    const result = MonopolyEngine.reduce(state, { type: 'FORCE_END_TURN', playerId: p1 }, mockRng);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.data.nextState.status).toBe('IN_PROGRESS');
+  });
+
+  it('returns to LOBBY on RESTART_GAME, then re-enters IN_PROGRESS on the next action', () => {
+    const state = initState();
+    const started = MonopolyEngine.reduce(state, { type: 'ROLL_DICE', playerId: p1 }, mockRng);
+    expect(started.success).toBe(true);
+    if (!started.success) return;
+    expect(started.data.nextState.status).toBe('IN_PROGRESS');
+
+    const restarted = MonopolyEngine.reduce(started.data.nextState, { type: 'RESTART_GAME', playerId: p1 }, mockRng);
+    expect(restarted.success).toBe(true);
+    if (!restarted.success) return;
+    expect(restarted.data.nextState.status).toBe('LOBBY');
+
+    const reStarted = MonopolyEngine.reduce(restarted.data.nextState, { type: 'ROLL_DICE', playerId: p1 }, mockRng);
+    expect(reStarted.success).toBe(true);
+    if (!reStarted.success) return;
+    expect(reStarted.data.nextState.status).toBe('IN_PROGRESS');
+  });
+
   it('is rejected for a non-active player', () => {
     const state = initState();
     expect(MonopolyEngine.isValidAction(state, { type: 'FORCE_END_TURN', playerId: p2 })).toBe(false);

@@ -14,6 +14,12 @@ This document tracks identified bugs, type safety issues, and planned improvemen
   - Memoized the three boards (`React.memo`), extracted Monopoly's `BoardSpaces` sub-grid, memoized Catan's `HexPolygon`/`VertexNode`/`EdgeNode`, and isolated Scotland Yard's static 199-node graph into a never-re-rendering `StaticGraph` with tokens in a separate memoized `PlayerTokens`.
 - **Status:** ✅ Fixed — App tests updated to resolve the lazy chunks (`findByText`/async). Full web-client suite green (42 tests), root typecheck clean, root + web-client lint clean (only pre-existing `exhaustive-deps` warnings), production `vite build` passes with the split chunk layout.
 
+### 20. Monopoly `status` Stuck in `LOBBY` — Never Transitioned to `IN_PROGRESS` (LOW-9; silently disabled the Phase 33 turn timer)
+- **Location:** `packages/monopoly-engine/src/MonopolyEngine.ts` (`getInitialState`, `reduce` — final return), `packages/server/test/Room.test.ts`
+- **Issue:** `getInitialState` returned `status: 'LOBBY'` and the reducer never moved the game to `IN_PROGRESS` (it only ever set `FINISHED`). The `Room.checkTurnTimeout` gate (`if (state.status && state.status !== 'IN_PROGRESS') return;`) therefore made the **Phase 33 turn timer / AFK auto-forfeit silently never fire for Monopoly** — the Room tests had to hand-hack `(room.getState() as any).status = 'IN_PROGRESS'` to bypass it. It was also a state-model inconsistency: Monopoly reported "LOBBY" for the entire game.
+- **Fix:** `reduce` now transitions `LOBBY → IN_PROGRESS` on the first successful action (guards run first, so rejected/unknown actions still leave the game in LOBBY). `RESTART_GAME` returns a fresh LOBBY snapshot early and re-enters on the next action. `Room.checkTurnTimeout` needs no change: a real first roll now moves Monopoly into `IN_PROGRESS`, enabling the AFK timer.
+- **Status:** ✅ Fixed — new engine tests (first-action transition + restart round-trip) in `turn-timer.test.ts`; Room tests updated to drive the real flow (`dispatch ROLL_DICE` → assert `IN_PROGRESS` → advance time) instead of forcing the status field.
+
 ### 1. `PlayerId` Type Import Error
 - **Location:** `packages/web-client/src/components/CatanDevCardManager.tsx`
 - **Issue:** The `PlayerId` type was incorrectly imported from `@packages/catan-engine`, which does not re-export it.
@@ -585,10 +591,10 @@ The following fixes address the verified open security & integrity issues in the
 - **Status:** ✅ Done
 
 ### 🟠 HIGH: Unbounded Session-Token Claims & Stalled Disconnects (MED-5, MED-9)
-- **Location:** `packages/server/src/server.ts`, `Room.ts`
+- **Location:** `packages/server/src/server.ts`, `Room.ts`, `RoomManager.ts`
 - **Issue:** Session tokens never expire if unredeemed. Disconnected players stall the game indefinitely.
 - **Proposed Fix:** Add a TTL to reserved session tokens. Add a heartbeat (ping/pong) to WS connections to detect drops. Implement a forfeit timer (e.g., 5 mins) that skips a disconnected player's turn or transitions them to a forfeit state.
-- **Status:** ⚠️ **NOT YET DONE**
+- **Status:** ✅ **Done** — Phase 31: unredeemed session tokens expire after a 5-minute TTL (`RoomManager` cleanup revokes via `tokenIssuedAt`), WS ping/pong heartbeats detect dead TCP connections (`server.ts`), and actively disconnected players trigger a generic `FORFEIT`/`END_TURN` after a 5-minute timeout. Phase 33 layered a per-room turn timer on top (auto-dispatch of `FORCE_END_TURN` / `SKIP_TURN` once `turnTimeLimitMs` passes).
 
 ### 🟡 MEDIUM: Action Guard Flaws (MED-7, MED-8, LOW-9)
 - **Location:** `ScotlandYardEngine.ts`, `MonopolyEngine.ts`
@@ -596,7 +602,7 @@ The following fixes address the verified open security & integrity issues in the
 - **Proposed Fix:** 
   - Scotland Yard: add `if (action.playerId !== currentState.activePlayerId) return false;`. 
   - Monopoly: add `if (currentPlayer.hasRolled) return { success: false, error: 'Already rolled' };` inside the `ROLL_DICE` reducer. Add a status transition from 'LOBBY' to 'IN_PROGRESS' when initialization is complete.
-- **Status:** ✅ MED-7 & MED-8 done. LOW-9 (Monopoly LOBBY → IN_PROGRESS transition) **NOT YET DONE**.
+- **Status:** ✅ MED-7 & MED-8 done. LOW-9 (Monopoly LOBBY → IN_PROGRESS transition) **DONE** — see Completed Fix #20 below.
 
 ### 🟡 MEDIUM: Silent Action Rejection (MED-4)
 - **Location:** `packages/server/src/Room.ts`
@@ -623,7 +629,7 @@ The following fixes address the verified open security & integrity issues in the
   - Use `crypto.randomUUID()` for unique IDs instead of `Math.random` (LOW-5, LOW-6).
   - Precompute a `Map<string, BoardSpace>` for Monopoly spaces instead of using `.find()` on arrays (LOW-4).
   - Use a higher precision RNG for server shuffling (LOW-2).
-- **Status:** ⚠️ **NOT YET DONE**
+- **Status:** ✅ **Done** — Phase 31: `CryptoRandomProvider.next()` produces cryptographically secure 32-bit floats; all UI toast/event IDs use `crypto.randomUUID()`; Monopoly spaces use the precomputed constant-time `BOARD_SPACES_MAP`. LOW-3 (the Catan longest-road DFS) already uses a memoized DFS (`memo: Map<string, number>`), and the Phase 34 Batch 4 gating of `checkWinConditionAndAwards` bounds its recomputation to VP-affecting actions.
 
 ### 🔴 NEW: Hot-seat Local Mode Broken for Seats Beyond Seat 1 (Regression from CRITICAL-1)
 - **Location:** `packages/web-client/src/components/Lobby.tsx`, `packages/server/src/{server,Room,RoomManager}.ts`

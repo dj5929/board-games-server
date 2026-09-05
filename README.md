@@ -161,6 +161,7 @@ This project uses different TypeScript versions in different packages intentiona
 ## 🛠️ Features
 - **Real-Time Multiplayer**: WebSocket synchronization for instant action reflection, secured per-room session tokens (crypto-random room IDs + token-verified connections).
 - **State Persistence & Resilience**: Built-in Redis support for server crash-recovery, HTTP rate limiting, Token-Bucket WebSocket throttling, and Ping/Pong heartbeat disconnect/forfeit management.
+- **Turn Timer / AFK Management**: optional per-room countdown (`TURN_TIME_LIMIT_MS`) with automatic `FORCE_END_TURN` / `SKIP_TURN` auto-forfeit across all three games, enforced by the server's turn timer and driven by Monopoly's `LOBBY → IN_PROGRESS` state transition, with a live `TurnTimer` countdown widget in every room (Phase 33).
 - **Strict Validation**: Zod schemas used to validate every action both on the server and client.
 - **Audio & Visual Polish**: Procedural Web Audio effects, dynamic 3D CSS dice rolls, and animated tokens.
 - **Interactive UI**: Rich contextual HUDs, robust trading modals, property management interfaces, and a dynamic event log.

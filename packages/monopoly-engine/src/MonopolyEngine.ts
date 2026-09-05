@@ -791,6 +791,14 @@ export const MonopolyEngine: IGameEngine<IMonopolyState, MonopolyAction, Monopol
       }
     }
 
+    // LOW-9: the game initializes in LOBBY and moves to IN_PROGRESS on the
+    // first successful action, so consuming code (e.g. the server turn timer)
+    // can distinguish a live game from a not-yet-started or finished one.
+    // RESTART_GAME returns a fresh LOBBY snapshot early and re-enters here.
+    if (nextState.status === 'LOBBY') {
+      nextState.status = 'IN_PROGRESS';
+    }
+
     return { success: true, data: { nextState, events } };
   },
 
