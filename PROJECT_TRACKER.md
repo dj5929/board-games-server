@@ -340,6 +340,16 @@ Server-side AI "bots" that fill seats and play automatically, so players can sta
 - 🟢 **Testing (TDD):** New `BotController.test.ts` (no-op for human turns / not-in-progress rooms; strategy dispatched through the real pipeline with authoritative state + real engine; invalid-strategy safety-skip; throwing-strategy tolerance; start/stop interval lifecycle) plus Room bot-seat tests, RoomManager `allRooms` + rehydration tests, and HTTP tests asserting bot seats are never joinable and bogus ids are ignored.
 - 🟢 **Verification:** Full suite green (**30 files / 328 tests**), root typecheck clean, root lint clean (scope extended to `packages/ai`), `@packages/server` production build passes.
 
+### 🟢 Step 2 (COMPLETE): `MonopolyBot` — Monopoly strategy (`packages/ai/src/MonopolyBot.ts`)
+- 🟢 **Heuristic decision order** (one action per `BotController` tick; every candidate is re-validated with `engine.isValidAction`, so a stale heuristic simply falls through to the next viable move — the bot can never cheat):
+  1. **Pending trade** involving the bot: accept if net-positive on deed price + money (Boardwalk-for-Mediterranean accepted, reverse rejected), reject otherwise, cancel any stale offer of its own. Bots never initiate trades.
+  2. **Unresolved debt:** pay if cash covers it → otherwise sell houses (most-developed deed first) → otherwise mortgage un-mortgaged deeds → otherwise declare bankruptcy. Self-healing across ticks: each tick shores up a little cash until the debt clears.
+  3. **Un-rolled:** escape jail (use a get-out-of-jail card → pay the $50 fine → roll as last resort when broke), otherwise `ROLL_DICE`.
+  4. **Rolled:** buy the property landed on when cash > price + a $100 buffer → build on every fully-owned, unmortgaged color group (small / cheap groups first, respecting the engine's even-build rule) → unmortgage deeds when flush above $500 → `END_TURN`.
+- 🟢 **`BotController` wiring:** `server.ts` registers `botController.registerStrategy('monopoly', new MonopolyBot())`, so real rooms with a `monopoly` bot seat play automatically once a human's first action has moved the room past `LOBBY`.
+- 🟢 **Testing (TDD):** `packages/ai/test/MonopolyBot.test.ts` — 15 cases: roll, jail (card vs fine vs roll-when-broke), buy affordable / skip unaffordable, pay / sell-house / mortgage / bankruptcy debt laddering, house building on a full color group, unmortgage-when-flush, and trade accept/reject/cancel. Plus `packages/server/test/BotGameplay.test.ts`: a bot-vs-bot Monopoly room (real MonopolyBot + real MonopolyEngine) advances deterministically through multiple full turns via the controller's dispatch pipeline.
+- 🟢 **Verification:** Full suite green (**32 files / 344 tests**), root typecheck clean, root lint clean, `@packages/server` production build passes.
+
 ---
 
 ## 🔮 Future Additions (Post-MVP)

@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import { roomManager } from './RoomManager';
 import { Room } from './Room';
 import { BotController } from './BotController';
+import { MonopolyBot } from '@packages/ai';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { CatanEngine } from '@packages/catan-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
@@ -25,6 +26,7 @@ export const ENGINES: Record<string, IGameEngine<IGameState, IPlayerAction, IGam
 
 /** Global bot controller; drives AI seats in any live room. */
 export const botController = new BotController(roomManager);
+botController.registerStrategy('monopoly', new MonopolyBot());
 
 const DEFAULT_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:8080'];
 const HOST = process.env.HOST ?? '0.0.0.0';
