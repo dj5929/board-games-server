@@ -367,6 +367,13 @@ Server-side AI "bots" that fill seats and play automatically, so players can sta
 - 🟢 **Testing (TDD):** `packages/ai/test/CatanBot.test.ts` — 14 cases: roll-first; city upgrade on an owned settlement; legal road-connected settlement build; end-turn when nothing affordable; dev-card buy; knight play (previous-turn card only); exact-resource bank trade; first-settlement placement; distance-rule proof for the second settlement; road attached to the pending settlement; exact-count most-abundant discard; robber move that robs the VP leader on an adjacent hex; favorable accept / unfavorable reject. Plus `BotGameplay.test.ts` adds a bot-vs-bot Catan room that completes all 12 placement actions tick-perfect and keeps the turn loop alive across all three seats.
 - 🟢 **Verification:** Full suite green (**34 files / 367 tests**), root typecheck clean, root lint clean, `@packages/server` production build passes.
 
+### 🟢 Step 5 (COMPLETE): Lobby bot-seat toggles (`packages/web-client/src/components/Lobby.tsx`)
+- 🟢 **`Computer Players (Bots)` selector:** the Lobby now offers a 0..`playerCount-1` bot count dropdown alongside the Players selector (labeled "None / N Computers"), wired to the existing `POST /rooms` `bots: string[]` field from Step 1.
+- 🟢 **Creator seat is never a bot:** bots are always assigned to the **tail** seats (`p2..pN`) computed client-side from the server's `p${i+1}` convention — the first seat (the hot-seat owner / online creator) is structurally guaranteed human. The bot count re-clamps whenever the player count shrinks (player-count change or game switch, e.g. Monopoly 8→Catan 3 lets at most 2 bots).
+- 🟢 **Both modes:** Hot Seat keeps all seats locally claimed while bots auto-fill the tail; Online auto-joins only the creator seat (`[data.playerIds[0]]`) with bots filling the remaining slots — a single player can now start a room against bots and wait for (or forego) remote joiners.
+- 🟢 **Testing (TDD):** `Lobby.test.tsx` grew from 9 → 13 tests: bots fill the last seat in hot-seat mode; the first seat is *never* in the `bots` array even when maxed out; online mode fills all non-creator seats with bots; bot count re-clamps when players drop below the bot count; existing create-body assertions updated for the explicit `bots: []` field; Players/Computer selects reachable via distinct `aria-label`s.
+- 🟢 **Verification:** Full suite green (**34 files / 371 tests**), root typecheck clean, root + `web-client` lint clean, `@packages/server` + `web-client` production builds pass.
+
 ---
 
 ## 🔮 Future Additions (Post-MVP)

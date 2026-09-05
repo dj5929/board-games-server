@@ -13,20 +13,26 @@ export function Lobby({ onJoinRoom }: Props) {
   const [mode, setMode] = useState<'local' | 'online'>('local');
   const [playerCount, setPlayerCount] = useState<number>(GAME_CONFIGS['monopoly'].minPlayers);
   const [gameType, setGameType] = useState<GameType>('monopoly');
+  const [botCount, setBotCount] = useState<number>(0);
 
   const selectGameType = (type: GameType) => {
     setGameType(type);
     const config = GAME_CONFIGS[type];
-    setPlayerCount((prev) => Math.min(Math.max(prev, config.minPlayers), config.maxPlayers));
+    const clamped = Math.min(Math.max(playerCount, config.minPlayers), config.maxPlayers);
+    setPlayerCount(clamped);
+    // The creator's first seat is always a human, so bots may never fill it.
+    setBotCount((prev) => Math.min(prev, clamped - 1));
   };
 
   const handleCreate = async () => {
     setIsLoading(true);
     try {
+      // Bots always occupy the tail seats (pN, pN-1, ...); p1 stays human.
+      const botIds = Array.from({ length: botCount }, (_, i) => `p${playerCount - botCount + 1 + i}`);
       const res = await fetch(`${API_URL}/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerCount, gameType, hotSeat: mode === 'local' })
+        body: JSON.stringify({ playerCount, gameType, hotSeat: mode === 'local', bots: botIds })
       });
       const data = await res.json();
       if (data.roomId) {
@@ -107,8 +113,13 @@ export function Lobby({ onJoinRoom }: Props) {
 
         <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider mt-2">Players</label>
         <select
+          aria-label="Number of players"
           value={playerCount}
-          onChange={e => setPlayerCount(Number(e.target.value))}
+          onChange={e => {
+            const next = Number(e.target.value);
+            setPlayerCount(next);
+            setBotCount(prev => Math.min(prev, next - 1));
+          }}
           className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white outline-none focus:border-blue-500"
         >
           {Array.from(
@@ -118,6 +129,23 @@ export function Lobby({ onJoinRoom }: Props) {
             <option key={count} value={count}>{count} Players</option>
           ))}
         </select>
+
+        <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider mt-2">Computer Players (Bots)</label>
+        <select
+          aria-label="Computer players"
+          value={botCount}
+          onChange={e => setBotCount(Number(e.target.value))}
+          className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white outline-none focus:border-purple-500"
+        >
+          {Array.from({ length: playerCount }, (_, i) => i).map(bots => (
+            <option key={bots} value={bots}>
+              {bots === 0 ? 'None' : bots === 1 ? '1 Computer' : `${bots} Computers`}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-gray-500">
+          Computer players auto-fill from the last seat; the first seat always stays a human slot.
+        </p>
       </div>
 
       <button

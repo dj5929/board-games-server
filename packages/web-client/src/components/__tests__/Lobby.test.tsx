@@ -39,7 +39,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 2, gameType: 'monopoly', hotSeat: true }),
+      body: JSON.stringify({ playerCount: 2, gameType: 'monopoly', hotSeat: true, bots: [] }),
     });
   });
 
@@ -53,7 +53,7 @@ describe('Lobby', () => {
     render(<Lobby onJoinRoom={onJoinRoom} />);
 
     fireEvent.click(screen.getByText('Catan'));
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
     fireEvent.click(screen.getByText('Create New Game'));
 
     await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-2', ['p1', 'p2', 'p3', 'p4'], 'catan', 'tok-2'));
@@ -61,7 +61,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 4, gameType: 'catan', hotSeat: true }),
+      body: JSON.stringify({ playerCount: 4, gameType: 'catan', hotSeat: true, bots: [] }),
     });
   });
 
@@ -110,14 +110,15 @@ describe('Lobby', () => {
     expect(screen.getByText('Monopoly')).toBeInTheDocument();
     expect(screen.getByText('Catan')).toBeInTheDocument();
     expect(screen.getByText('Scotland Yard')).toBeInTheDocument();
-    expect(screen.getByRole('combobox')).toHaveValue('2');
+    expect(screen.getByLabelText('Number of players')).toHaveValue('2');
+    expect(screen.getByLabelText('Computer players')).toHaveValue('0');
   });
 
   it('shows the correct player count range and re-clamps per selected game', () => {
     mockFetchResponse({});
     render(<Lobby onJoinRoom={onJoinRoom} />);
 
-    const combo = () => screen.getByRole('combobox') as HTMLSelectElement;
+    const combo = () => screen.getByLabelText('Number of players') as HTMLSelectElement;
 
     expect(Array.from(combo().options).map(o => o.value)).toEqual(['2', '3', '4', '5', '6', '7', '8']);
     expect(combo()).toHaveValue('2');
@@ -180,5 +181,100 @@ describe('Lobby', () => {
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Room not found'));
     expect(onJoinRoom).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
+  });
+
+  it('creates a hot-seat game with one computer player filling the last seat', async () => {
+    mockFetchResponse({
+      roomId: 'room-bot',
+      playerIds: ['p1', 'p2', 'p3'],
+      gameType: 'monopoly',
+      sessionToken: 'tok-bot',
+    });
+    render(<Lobby onJoinRoom={onJoinRoom} />);
+
+    fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '1' } });
+    fireEvent.click(screen.getByText('Create New Game'));
+
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-bot', ['p1', 'p2', 'p3'], 'monopoly', 'tok-bot'));
+
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerCount: 3, gameType: 'monopoly', hotSeat: true, bots: ['p3'] }),
+    });
+  });
+
+  it('never marks the creator (first) seat as a bot', async () => {
+    mockFetchResponse({
+      roomId: 'room-abot',
+      playerIds: ['p1', 'p2', 'p3', 'p4'],
+      gameType: 'monopoly',
+      sessionToken: 'tok-abot',
+    });
+    render(<Lobby onJoinRoom={onJoinRoom} />);
+
+    fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '3' } });
+    fireEvent.click(screen.getByText('Create New Game'));
+
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledTimes(1));
+
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerCount: 4, gameType: 'monopoly', hotSeat: true, bots: ['p2', 'p3', 'p4'] }),
+    });
+  });
+
+  it('fills all non-creator seats with bots in online mode', async () => {
+    mockFetchResponse({
+      roomId: 'room-online-bot',
+      playerIds: ['p1', 'p2', 'p3'],
+      gameType: 'catan',
+      sessionToken: 'tok-online-bot',
+    });
+    render(<Lobby onJoinRoom={onJoinRoom} />);
+
+    fireEvent.click(screen.getByText('Online'));
+    fireEvent.click(screen.getByText('Catan'));
+    fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('Create New Game'));
+
+    await waitFor(() =>
+      expect(onJoinRoom).toHaveBeenCalledWith('room-online-bot', ['p1'], 'catan', 'tok-online-bot')
+    );
+
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerCount: 3, gameType: 'catan', hotSeat: false, bots: ['p2', 'p3'] }),
+    });
+  });
+
+  it('re-clamps computer players when the player count shrinks below the bot count', async () => {
+    mockFetchResponse({
+      roomId: 'room-clamp',
+      playerIds: ['p1', 'p2', 'p3'],
+      gameType: 'monopoly',
+      sessionToken: 'tok-clamp',
+    });
+    render(<Lobby onJoinRoom={onJoinRoom} />);
+
+    fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '3' } });
+
+    expect(screen.getByLabelText('Computer players')).toHaveValue('2');
+
+    fireEvent.click(screen.getByText('Create New Game'));
+
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledTimes(1));
+
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerCount: 3, gameType: 'monopoly', hotSeat: true, bots: ['p2', 'p3'] }),
+    });
   });
 });
