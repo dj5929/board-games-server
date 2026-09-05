@@ -322,5 +322,25 @@ A codebase-wide performance review was completed and all identified optimization
 
 ---
 
+## 🟢 Automated Computer AI Players (Phase 35)
+
+Server-side AI "bots" that fill seats and play automatically, so players can start rooms with fewer humans, practice solo, or demo games that run themselves. Bots are a **server-layer** concern: the game engines are untouched (pure state machines remain human-only APIs). Driven by a new `@packages/ai` workspace (pluggable per-game strategies implementing `IBotStrategy<TState,TAction,TEvent>`) and a `BotController` that sweeps all live rooms once per second.
+
+### 🟢 Step 1 (COMPLETE): `botSeats` infrastructure + `BotController` + room API
+- 🟢 **`Room` AI-seat flag (`packages/server/src/Room.ts`):** New `botSeats: ReadonlySet<string>` option + `isBot(playerId)` helper + `getEngine()` accessor, mirroring the existing `isHotSeat`/`ownerPlayerId` pattern exactly.
+  - `getAvailablePlayerId()` now **skips bot seats** — a bot's seat is permanently occupied and is never handed to a joining human.
+  - **Persistence:** `botSeats` is written into the Redis snapshot (`writeSnapshot`) and restored on boot (`loadState` + the `RoomManager.initFromRedis` constructor path), exactly like the hot-seat flags. Rehydrated rooms keep their AI seats across restarts.
+- 🟢 **`RoomManager.allRooms()` iterator:** exposes every live room to the controller sweep.
+- 🟢 **`BotController` (`packages/server/src/BotController.ts`):**
+  - 1-second `setInterval` sweep (same cadence as the Phase 33 turn timer, `unref()`'d so it never holds the process open).
+  - On each tick, per room: skip non-`IN_PROGRESS` states and rooms with no bots; resolve the active seat using the room's own turn convention (`activePlayerId` OR `currentPlayerIndex`, mirroring `checkTurnTimeout`); if the active seat is a bot, ask that game's strategy for a move.
+  - **Safety:** the returned action is re-validated with `engine.isValidAction` before `room.dispatch`, and `strategy.decide` is wrapped in try/catch — a buggy strategy can never corrupt a game or crash the sweep; worst case the move is skipped and retried next tick.
+  - Bot actions go through the **identical** `Room.dispatch` pipeline as human WebSocket messages (validate → reduce → snapshot → broadcast), so ordering and persistence guarantees are unchanged. Registered strategies are injectable (`registerStrategy`), exposing `tick()`/`start()`/`stop()` for tests.
+- 🟢 **`POST /rooms` accepts `bots: string[]` (`packages/server/src/server.ts`):** the room API now accepts which seat ids are AI-controlled; non-existent ids are ignored; `botController` (module singleton) starts on server boot.
+- 🟢 **Testing (TDD):** New `BotController.test.ts` (no-op for human turns / not-in-progress rooms; strategy dispatched through the real pipeline with authoritative state + real engine; invalid-strategy safety-skip; throwing-strategy tolerance; start/stop interval lifecycle) plus Room bot-seat tests, RoomManager `allRooms` + rehydration tests, and HTTP tests asserting bot seats are never joinable and bogus ids are ignored.
+- 🟢 **Verification:** Full suite green (**30 files / 328 tests**), root typecheck clean, root lint clean (scope extended to `packages/ai`), `@packages/server` production build passes.
+
+---
+
 ## 🔮 Future Additions (Post-MVP)
 

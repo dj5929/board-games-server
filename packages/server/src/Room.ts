@@ -19,6 +19,10 @@ export interface IRoomOptions {
   /** Turn time limit in ms. When the active player exceeds it, their turn is
    *  force-advanced (FORCE_END_TURN / SKIP_TURN). 0 or undefined disables. */
   turnTimeLimitMs?: number;
+  /** Seats controlled by the server-side AI (`BotController`) rather than a
+   *  human connection. Bot seats are never handed out to joining clients and
+   *  never hold session tokens or WebSocket connections. */
+  botSeats?: ReadonlyArray<string>;
 }
 
 export class Room<S extends IGameState, A extends IPlayerAction, E extends IGameEvent> {
@@ -40,6 +44,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   public lastActivity: number;
   public readonly isHotSeat: boolean;
   public readonly ownerPlayerId: string | null;
+  public readonly botSeats: ReadonlySet<string>;
 
   constructor(
     public readonly id: string,
@@ -56,6 +61,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     this.turnTimeLimitMs = options.turnTimeLimitMs ?? 0;
     this.isHotSeat = options.isHotSeat ?? false;
     this.ownerPlayerId = options.ownerPlayerId ?? null;
+    this.botSeats = new Set(options.botSeats ?? []);
     this.isRehydrated = !!initialState;
     // Skip the redundant persistence write on the rehydrate path: loadState()
     // has just read this exact snapshot from the store, so writing it straight
@@ -68,6 +74,16 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   /** True when the given id corresponds to a seat in this room's game state. */
   public hasPlayer(playerId: string): boolean {
     return this.state.players.some(p => p.id === playerId);
+  }
+
+  /** True when the given seat is controlled by the server-side AI. */
+  public isBot(playerId: string): boolean {
+    return this.botSeats.has(playerId);
+  }
+
+  /** The game engine this room is running (used by the AI to explore legal moves). */
+  public getEngine(): IGameEngine<S, A, E> {
+    return this.engine;
   }
 
   /**
@@ -116,6 +132,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       state: this.state,
       isHotSeat: this.isHotSeat,
       ownerPlayerId: this.ownerPlayerId,
+      botSeats: Array.from(this.botSeats),
       turnStartedAt: this.turnStartedAt,
       turnTimeLimitMs: this.turnTimeLimitMs,
       sessionTokens: Array.from(this.sessionTokens.entries()),
@@ -139,6 +156,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     // (see RoomManager.initFromRedis) rather than direct reassignment.
     (this as { isHotSeat: boolean }).isHotSeat = data.isHotSeat === true;
     (this as { ownerPlayerId: string | null }).ownerPlayerId = data.ownerPlayerId ?? null;
+    (this as { botSeats: ReadonlySet<string> }).botSeats = new Set(data.botSeats ?? []);
   }
 
   public getState(): S {
@@ -373,6 +391,8 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   public getAvailablePlayerId(): string | null {
     const allPlayerIds = this.state.players.map(p => p.id);
     for (const id of allPlayerIds) {
+      // Bots occupy their seats permanently: never offer a bot seat to a joiner.
+      if (this.botSeats.has(id)) continue;
       if (!this.connections.has(id) && !this.sessionTokens.has(id)) return id;
     }
     return null;

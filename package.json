@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "lint": "oxlint -c .oxlintrc.json packages/engine-core packages/monopoly-engine packages/catan-engine packages/scotland-yard-engine packages/server",
+    "lint": "oxlint -c .oxlintrc.json packages/engine-core packages/monopoly-engine packages/catan-engine packages/scotland-yard-engine packages/server packages/ai",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

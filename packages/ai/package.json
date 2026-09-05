@@ -1,0 +1,14 @@
+{
+  "name": "@packages/ai",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@packages/catan-engine": "*",
+    "@packages/engine-core": "*",
+    "@packages/monopoly-engine": "*",
+    "@packages/scotland-yard-engine": "*"
+  }
+}

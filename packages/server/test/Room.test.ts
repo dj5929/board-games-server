@@ -272,4 +272,53 @@ describe('Room', () => {
       vi.useRealTimers();
     }
   });
+
+  it('marks bot seats via options and exposes isBot (Phase 35)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('bot-room-1', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2', 'p3'], undefined, {
+      botSeats: ['p2']
+    });
+
+    expect(room.isBot('p2')).toBe(true);
+    expect(room.isBot('p1')).toBe(false);
+    expect(room.isBot('p3')).toBe(false);
+  });
+
+  it('excludes bot seats from available seats (Phase 35)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('bot-room-2', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2', 'p3'], undefined, {
+      botSeats: ['p2']
+    });
+
+    // Real server flow: the creator claims p1 with a session token.
+    room.issueSessionToken('p1');
+
+    // p2 is a bot seat and must never be handed to a joining human.
+    expect(room.getAvailablePlayerId()).toBe('p3');
+  });
+
+  it('restores bot seats from a persisted snapshot (Phase 35)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('bot-persist', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2', 'p3'], undefined, {
+      botSeats: ['p2']
+    });
+
+    const restored = new Room('bot-persist', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2', 'p3'], undefined, {
+      botSeats: []
+    });
+    (restored as any).loadState({
+      state: room.getState(),
+      sessionTokens: [],
+      tokenIssuedAt: [],
+      disconnectedAt: [],
+      lastActivity: Date.now(),
+      turnStartedAt: Date.now(),
+      isHotSeat: false,
+      ownerPlayerId: null,
+      botSeats: Array.from(room.botSeats)
+    });
+
+    expect(restored.isBot('p2')).toBe(true);
+    expect(restored.isBot('p1')).toBe(false);
+  });
 });

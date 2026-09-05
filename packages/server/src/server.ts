@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { roomManager } from './RoomManager';
 import { Room } from './Room';
+import { BotController } from './BotController';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { CatanEngine } from '@packages/catan-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
@@ -21,6 +22,9 @@ export const ENGINES: Record<string, IGameEngine<IGameState, IPlayerAction, IGam
   'catan': CatanEngine,
   'scotland-yard': ScotlandYardEngine
 };
+
+/** Global bot controller; drives AI seats in any live room. */
+export const botController = new BotController(roomManager);
 
 const DEFAULT_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:8080'];
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -40,7 +44,7 @@ export const buildApp = (logger: boolean = true) => {
   fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
   fastify.register(fastifyWebsocket);
 
-  fastify.post<{ Body: { playerCount?: number; gameType?: string; hotSeat?: boolean } }>('/rooms', async (request, reply) => {
+  fastify.post<{ Body: { playerCount?: number; gameType?: string; hotSeat?: boolean; bots?: string[] } }>('/rooms', async (request, reply) => {
     const body = request.body || {};
     const gameType = body.gameType || 'monopoly';
 
@@ -60,6 +64,9 @@ export const buildApp = (logger: boolean = true) => {
 
     const playerIds = Array.from({ length: playerCount }, (_, i) => `p${i + 1}`);
 
+    // Bot seats fill unspecified player slots; unknown ids (not real seats) are ignored.
+    const botSeats = Array.isArray(body.bots) ? body.bots.filter(id => playerIds.includes(id)) : [];
+
     const roomId = crypto.randomUUID();
 
     const engine = ENGINES[gameType];
@@ -72,7 +79,7 @@ export const buildApp = (logger: boolean = true) => {
     const isHotSeat = body.hotSeat === true;
     const room = new Room<IGameState, IPlayerAction, IGameEvent>(
       roomId, gameType, engine, CryptoRandomProvider, playerIds, undefined,
-      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null, turnTimeLimitMs: TURN_TIME_LIMIT_MS }
+      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null, turnTimeLimitMs: TURN_TIME_LIMIT_MS, botSeats }
     );
     roomManager.createRoom(room);
 
@@ -205,6 +212,7 @@ export const start = async () => {
     fastify.log.error(err);
     process.exit(1);
   }
+  botController.start();
   // Rehydrate persisted rooms in the background so the server begins serving
   // immediately rather than delaying time-to-serve behind thousands of Redis
   // GETs. Rooms become joinable as they are restored. Errors are logged by the

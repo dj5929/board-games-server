@@ -151,6 +151,7 @@ The client/server log line `Rehydrated room <id> from Redis` simply means *"a ga
 - `@packages/catan-engine`: Resource management, hex grid coordinate systems, building, maritime trade, robber mechanics, development cards, awards, and win conditions.
 - `@packages/scotland-yard-engine`: Graph-based map navigation, hidden movement, ticket management, and Mr. X reveal mechanics.
 - `@packages/server`: A Fastify + WebSocket (`@fastify/websocket`) server with robust Zod validation for room and game state synchronization.
+- `@packages/ai`: Pluggable server-side AI player strategies (`IBotStrategy`) driven by the `BotController` sweep — bots fill seats and play via the same validated `Room.dispatch` pipeline as humans (Phase 35).
 - `@packages/web-client`: The frontend React application built with Vite and Tailwind CSS. Features highly interactive UIs, smooth CSS animations, floating event logs, Web Audio API sound effects, and robust optimistic state updates.
 
 ## ⚙️ Note on TypeScript Versions
@@ -163,6 +164,7 @@ This project uses different TypeScript versions in different packages intentiona
 - **State Persistence & Resilience**: Built-in Redis support for server crash-recovery, HTTP rate limiting, Token-Bucket WebSocket throttling, and Ping/Pong heartbeat disconnect/forfeit management.
 - **Turn Timer / AFK Management**: optional per-room countdown (`TURN_TIME_LIMIT_MS`) with automatic `FORCE_END_TURN` / `SKIP_TURN` auto-forfeit across all three games, enforced by the server's turn timer and driven by Monopoly's `LOBBY → IN_PROGRESS` state transition, with a live `TurnTimer` countdown widget in every room (Phase 33).
 - **Strict Validation**: Zod schemas used to validate every action both on the server and client.
+- **Computer AI Players**: server-side bots that occupy seats and play automatically (Monopoly/Catan/Scotland Yard strategies via `@packages/ai`); `POST /rooms` accepts `bots: string[]`, and bot seats are reserved so humans never join into one (Phase 35).
 - **Audio & Visual Polish**: Procedural Web Audio effects, dynamic 3D CSS dice rolls, and animated tokens.
 - **Interactive UI**: Rich contextual HUDs, robust trading modals, property management interfaces, and a dynamic event log.
 - **TDD Backed**: Comprehensive test suites for game engines guaranteeing rule enforcement (e.g., Monopoly's complex edge cases like debt collection and even-build rules).

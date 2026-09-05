@@ -38,7 +38,7 @@ function waitUntil(cond: () => boolean, timeoutMs = 8000): Promise<void> {
   });
 }
 
-async function createRoom(payload: { gameType?: string; playerCount?: number; hotSeat?: boolean } = {}) {
+async function createRoom(payload: { gameType?: string; playerCount?: number; hotSeat?: boolean; bots?: string[] } = {}) {
   const res = await app.inject({ method: 'POST', url: '/rooms', payload });
   expect(res.statusCode).toBe(200);
   return res.json() as {
@@ -119,6 +119,32 @@ describe('POST /rooms', () => {
 
     const normal = await createRoom({ playerCount: 2 });
     expect(normal.isHotSeat).toBe(false);
+  });
+
+  it('creates a room with bot seats that joining clients cannot claim (Phase 35)', async () => {
+    const body = await createRoom({ playerCount: 3, bots: ['p2'] });
+
+    // p2 is a bot seat: the first human joiner must get p3 (p1 is the creator).
+    const join1 = await app.inject({ method: 'POST', url: `/rooms/${body.roomId}/join` });
+    expect(join1.statusCode).toBe(200);
+    expect(join1.json().playerId).toBe('p3');
+
+    // p1 (creator) + p2 (bot) + p3 (joined) → the room is now full.
+    const join2 = await app.inject({ method: 'POST', url: `/rooms/${body.roomId}/join` });
+    expect(join2.statusCode).toBe(400);
+    expect(join2.json()).toEqual({ error: 'Room is full' });
+
+    // The internal room registers p2 as a bot.
+    const internal = roomManager.getRoom(body.roomId) as any;
+    expect(internal.isBot('p2')).toBe(true);
+  });
+
+  it('ignores bot seat names that do not match any seat', async () => {
+    const body = await createRoom({ playerCount: 2, bots: ['p2', 'ghost'] });
+
+    const internal = roomManager.getRoom(body.roomId) as any;
+    expect(internal.isBot('p2')).toBe(true);
+    expect(internal.isBot('ghost')).toBe(false);
   });
 });
 

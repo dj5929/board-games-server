@@ -139,4 +139,27 @@ describe('RoomManager', () => {
     expect(restored?.ownerPlayerId).toBe('p1');
     manager.stopCleanup();
   });
+
+  it('iterates all rooms via allRooms', () => {
+    const manager = new RoomManager();
+    manager.createRoom(makeRoom('iter-a'));
+    manager.createRoom(makeRoom('iter-b'));
+    expect(manager.roomCount).toBe(2);
+    expect([...manager.allRooms()].map(r => r.id).sort()).toEqual(['iter-a', 'iter-b']);
+    manager.stopCleanup();
+  });
+
+  it('rehydrates bot seats alongside the game state (Phase 35)', async () => {
+    new Room('botroom', 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2', 'p3'], undefined, {
+      botSeats: ['p2']
+    });
+
+    const manager = new RoomManager();
+    await manager.initFromRedis({ monopoly: MonopolyEngine } as any);
+
+    const restored = manager.getRoom('botroom');
+    expect(restored?.isBot('p2')).toBe(true);
+    expect(restored?.isBot('p1')).toBe(false);
+    manager.stopCleanup();
+  });
 });

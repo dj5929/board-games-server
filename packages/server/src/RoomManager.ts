@@ -45,6 +45,11 @@ export class RoomManager {
     return this.rooms.get(id);
   }
 
+  /** Iterate every live room. Used by the BotController sweep. */
+  public *allRooms(): Iterable<Room<IGameState, IPlayerAction, IGameEvent>> {
+    yield* this.rooms.values();
+  }
+
   public removeRoom(id: string) {
     const room = this.rooms.get(id);
     if (room) {
@@ -89,7 +94,8 @@ export class RoomManager {
         const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, [], data.state, {
           isHotSeat: data.isHotSeat === true,
           ownerPlayerId: data.ownerPlayerId ?? null,
-          turnTimeLimitMs: data.turnTimeLimitMs ?? 0
+          turnTimeLimitMs: data.turnTimeLimitMs ?? 0,
+          botSeats: data.botSeats ?? []
         });
         room.loadState(data);
         room.setPubSub(this.pubsub);
