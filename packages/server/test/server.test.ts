@@ -43,6 +43,7 @@ async function createRoom(payload: { gameType?: string; playerCount?: number; ho
   expect(res.statusCode).toBe(200);
   return res.json() as {
     roomId: string;
+    roomCode: string;
     playerIds: string[];
     gameType: string;
     playerId: string;
@@ -785,4 +786,45 @@ describe('in-room chat (Phase 38)', () => {
       return d.type === 'CHAT_MESSAGE' && d.message.text === 'now live';
     }));
   }, 20000);
+});
+
+describe('room codes & invite links (Phase 40)', () => {
+  it('returns a valid shareable code on create and exposes it in the directory', async () => {
+    const body = await createRoom({ playerCount: 2, isPublic: true });
+    expect(body.roomCode).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+
+    const rooms = await app.inject({ method: 'GET', url: '/rooms' });
+    const entry = rooms.json().rooms.find((r: any) => r.roomId === body.roomId);
+    expect(entry?.roomCode).toBe(body.roomCode);
+    roomManager.removeRoom(body.roomId);
+  });
+
+  it('joins a room by its invite code, case-insensitively (Phase 40)', async () => {
+    const body = await createRoom({ playerCount: 2 });
+    const join = await app.inject({ method: 'POST', url: `/rooms/${body.roomCode.toLowerCase()}/join` });
+    expect(join.statusCode).toBe(200);
+    expect(join.json().playerId).toBe('p2');
+    expect(join.json().roomId).toBe(body.roomId);
+    expect(join.json().roomCode).toBe(body.roomCode);
+    roomManager.removeRoom(body.roomId);
+  });
+
+  it('spectates a room by its invite code (Phase 40)', async () => {
+    const body = await createRoom({ playerCount: 2 });
+    const spec = await app.inject({ method: 'POST', url: `/rooms/${body.roomCode}/spectate` });
+    expect(spec.statusCode).toBe(200);
+    const cred = spec.json();
+    expect(cred.roomId).toBe(body.roomId);
+    expect(cred.roomCode).toBe(body.roomCode);
+    expect(cred.spectatorId).toBeTruthy();
+    expect(cred.token).toBeTruthy();
+    roomManager.removeRoom(body.roomId);
+  });
+
+  it('rejects unknown codes with a 404 (Phase 40)', async () => {
+    const join = await app.inject({ method: 'POST', url: '/rooms/ZZZZZZ/join' });
+    expect(join.statusCode).toBe(404);
+    const spec = await app.inject({ method: 'POST', url: '/rooms/ZZZZZZ/spectate' });
+    expect(spec.statusCode).toBe(404);
+  });
 });

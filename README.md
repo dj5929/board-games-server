@@ -20,6 +20,7 @@ Games currently implemented:
 - **Per-game player rules** — the Lobby's player selector adapts to each game's official range (Monopoly 2–8, Catan 3–4, Scotland Yard 3–6), enforced at both the server and engine layers.
 - **Computer AI Players in the Lobby** — pick "Computer Players (Bots)" when creating a room; bots always auto-fill from the last seat so the first seat stays a human slot (works in both hot-seat and online modes).
 - **Public Room Browser** — the Lobby polls `GET /rooms` and lists every public room live (status pill, seats taken/open, and Hot-Seat / Bot / watching chips). Join a free seat or watch a game as a spectator right from the directory, with an opt-in "list this room in the public browser" checkbox (Phase 37).
+- **Invite via Deep Links & Short Codes** — players can invite friends to specific rooms via 6-character short codes and direct deep links (e.g. `?join=A8K2M9`), bypassing the public browser entirely (Phase 40).
 - **Spectator Mode** — watch any game (full, hot-seat, or bot-filled) as a read-only observer: spectators receive fully hidden per-player projections, never occupy a seat, see a live "N watching" tally, and their messages are never dispatched (Phase 36).
 - **Defense in depth validation** — the same Zod schemas validate every action on both the client *and* the server.
 - **Polish** — a rich React UI with contextual HUDs, animated tokens, procedural Web Audio sound effects, and a live event log.

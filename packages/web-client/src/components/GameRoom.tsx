@@ -10,6 +10,7 @@ import { Dice3D } from './Dice3D';
 import { RulebookModal } from './RulebookModal';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
 import { RoomChat, type ChatMessage } from './RoomChat';
+import { RoomInvite } from './RoomInvite';
 import { useToasts } from '../hooks/useToasts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -20,6 +21,7 @@ interface Props {
   localPlayerIds: string[];
   sessionToken: string;
   spectatorId?: string;
+  roomCode?: string;
   onLeave: () => void;
 }
 
@@ -29,7 +31,7 @@ interface EventLogEntry {
   msg: string;
 }
 
-export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, onLeave }: Props) {
+export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, roomCode, onLeave }: Props) {
   const [state, setState] = useState<IMonopolyState | null>(null);
   const [error, setError] = useState('');
   const { toasts, addToast } = useToasts();
@@ -321,6 +323,7 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, on
           )}
         </div>
         <div className="flex gap-2 md:gap-4 items-center">
+          {roomCode && <RoomInvite roomCode={roomCode} />}
           <TurnTimer timer={turnTimer} isMyTurn={isMyTurn} />
           <button onClick={() => setShowRules(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
             Rules

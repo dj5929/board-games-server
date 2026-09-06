@@ -5,6 +5,7 @@ import { ScotlandYardBoard } from './ScotlandYardBoard';
 import { SoundEngine } from '../utils/SoundEngine';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
 import { RoomChat, type ChatMessage } from './RoomChat';
+import { RoomInvite } from './RoomInvite';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -14,10 +15,11 @@ interface Props {
   localPlayerIds: string[];
   sessionToken: string;
   spectatorId?: string;
+  roomCode?: string;
   onLeave: () => void;
 }
 
-export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectatorId, onLeave }: Props) {
+export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectatorId, roomCode, onLeave }: Props) {
   const [state, setState] = useState<ScotlandYardState | null>(null);
   const [error, setError] = useState('');
   const [nodeInput, setNodeInput] = useState('');
@@ -181,6 +183,7 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
       {/* Sidebar: Turn info & Tickets */}
       <div className="w-96 min-w-96 shrink-0 bg-gray-800 rounded-2xl p-4 flex flex-col shadow-xl border border-gray-700 overflow-y-auto">
          <div className="flex items-center justify-between mb-2 border-b border-gray-700 pb-2">
+           {roomCode && <RoomInvite roomCode={roomCode} />}
            <h2 className="text-xl font-bold">Turn {state.currentTurn}</h2>
            <TurnTimer timer={turnTimer} isMyTurn={!!isLocalActive} />
          </div>

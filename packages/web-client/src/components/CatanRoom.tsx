@@ -11,6 +11,7 @@ import { CatanRobberVictimModal } from './CatanRobberVictimModal';
 import { CatanDevCardManager } from './CatanDevCardManager';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
 import { RoomChat, type ChatMessage } from './RoomChat';
+import { RoomInvite } from './RoomInvite';
 import { useToasts } from '../hooks/useToasts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -21,6 +22,7 @@ interface Props {
   localPlayerIds: string[];
   sessionToken: string;
   spectatorId?: string;
+  roomCode?: string;
   onLeave: () => void;
 }
 
@@ -30,7 +32,7 @@ interface EventLogEntry {
   msg: string;
 }
 
-export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, onLeave }: Props) {
+export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, roomCode, onLeave }: Props) {
   const [state, setState] = useState<ICatanState | null>(null);
   const [error, setError] = useState('');
   const { toasts, addToast } = useToasts();
@@ -397,6 +399,7 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, o
           )}
         </div>
         <div className="flex gap-4 items-center">
+          {roomCode && <RoomInvite roomCode={roomCode} />}
           <TurnTimer timer={turnTimer} isMyTurn={isMyTurn} />
           <button onClick={() => setShowRules(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
             Rules

@@ -21,7 +21,10 @@ describe('Lobby', () => {
     alertSpy.mockRestore();
   });
 
-  function mockFetchResponse(body: unknown) {
+  function mockFetchResponse(body: any) {
+    if (typeof body === 'object' && body !== null && !body.rooms) {
+        body.roomCode = body.roomCode || 'mock-code';
+    }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => body }));
   }
 
@@ -36,7 +39,7 @@ describe('Lobby', () => {
 
     fireEvent.click(screen.getByText('Create New Game'));
 
-    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-1', ['p1', 'p2'], 'monopoly', 'tok-1'));
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-1', ['p1', 'p2'], 'monopoly', 'tok-1', 'mock-code'));
 
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
@@ -58,7 +61,7 @@ describe('Lobby', () => {
     fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
     fireEvent.click(screen.getByText('Create New Game'));
 
-    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-2', ['p1', 'p2', 'p3', 'p4'], 'catan', 'tok-2'));
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-2', ['p1', 'p2', 'p3', 'p4'], 'catan', 'tok-2', 'mock-code'));
 
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
@@ -151,7 +154,7 @@ describe('Lobby', () => {
     fireEvent.click(screen.getByText('Online'));
     fireEvent.click(screen.getByText('Create New Game'));
 
-    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-online', ['p1'], 'catan', 'tok-online'));
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-online', ['p1'], 'catan', 'tok-online', 'mock-code'));
   });
 
   it('joins an existing room by id', async () => {
@@ -162,10 +165,10 @@ describe('Lobby', () => {
     });
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
-    fireEvent.change(screen.getByPlaceholderText('Room ID'), { target: { value: 'abc123' } });
+    fireEvent.change(screen.getByPlaceholderText('Room ID or Code'), { target: { value: 'abc123' } });
     fireEvent.click(screen.getByText('Join'));
 
-    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('abc123', ['p2'], 'monopoly', 'tok-join'));
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('abc123', ['p2'], 'monopoly', 'tok-join', 'mock-code'));
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/abc123/join`, { method: 'POST' });
   });
 
@@ -177,7 +180,7 @@ describe('Lobby', () => {
     );
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
-    fireEvent.change(screen.getByPlaceholderText('Room ID'), { target: { value: 'nope' } });
+    fireEvent.change(screen.getByPlaceholderText('Room ID or Code'), { target: { value: 'nope' } });
     fireEvent.click(screen.getByText('Join'));
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Room not found'));
@@ -198,7 +201,7 @@ describe('Lobby', () => {
     fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '1' } });
     fireEvent.click(screen.getByText('Create New Game'));
 
-    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-bot', ['p1', 'p2', 'p3'], 'monopoly', 'tok-bot'));
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-bot', ['p1', 'p2', 'p3'], 'monopoly', 'tok-bot', 'mock-code'));
 
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
@@ -244,7 +247,7 @@ describe('Lobby', () => {
     fireEvent.click(screen.getByText('Create New Game'));
 
     await waitFor(() =>
-      expect(onJoinRoom).toHaveBeenCalledWith('room-online-bot', ['p1'], 'catan', 'tok-online-bot')
+      expect(onJoinRoom).toHaveBeenCalledWith('room-online-bot', ['p1'], 'catan', 'tok-online-bot', 'mock-code')
     );
 
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
@@ -289,10 +292,10 @@ describe('Lobby', () => {
     });
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
-    fireEvent.change(screen.getByPlaceholderText('Room ID to watch'), { target: { value: 'abc123' } });
+    fireEvent.change(screen.getByPlaceholderText('Room ID or Code to watch'), { target: { value: 'abc123' } });
     fireEvent.click(screen.getByText('Spectate'));
 
-    await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-spec', 'monopoly', 'spectator-1', 'tok-spec'));
+    await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-spec', 'monopoly', 'spectator-1', 'tok-spec', 'mock-code'));
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/abc123/spectate`, { method: 'POST' });
     expect(onJoinRoom).not.toHaveBeenCalled();
   });
@@ -305,7 +308,7 @@ describe('Lobby', () => {
     );
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
-    fireEvent.change(screen.getByPlaceholderText('Room ID to watch'), { target: { value: 'nope' } });
+    fireEvent.change(screen.getByPlaceholderText('Room ID or Code to watch'), { target: { value: 'nope' } });
     fireEvent.click(screen.getByText('Spectate'));
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Room not found'));
@@ -325,7 +328,7 @@ describe('Lobby', () => {
     fireEvent.click(screen.getByLabelText('Public room'));
     fireEvent.click(screen.getByText('Create New Game'));
 
-    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-priv', ['p1', 'p2'], 'monopoly', 'tok-priv', 'mock-code'));
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -383,6 +386,7 @@ describe('Lobby', () => {
     const rooms = [
       {
         roomId: 'room-a',
+        roomCode: 'ABCDEF',
         gameType: 'monopoly',
         label: 'Monopoly',
         seats: 2,
@@ -401,7 +405,7 @@ describe('Lobby', () => {
       'fetch',
       vi.fn(async (url: string) => {
         if (url === `${API_URL}/rooms`) return { json: async () => ({ rooms }) };
-        return { json: async () => ({ playerId: 'p2', gameType: 'monopoly', sessionToken: 'tok-dir' }) };
+        return { json: async () => ({ roomId: 'room-a', roomCode: 'ABCDEF', playerId: 'p2', gameType: 'monopoly', sessionToken: 'tok-dir' }) };
       })
     );
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
@@ -409,7 +413,7 @@ describe('Lobby', () => {
     const joinButton = (await screen.findByText('room-a')).closest('li')!.querySelector('button')!;
     fireEvent.click(joinButton);
 
-    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-a', ['p2'], 'monopoly', 'tok-dir'));
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-a', ['p2'], 'monopoly', 'tok-dir', 'ABCDEF'));
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/room-a/join`, { method: 'POST' });
   });
 
@@ -435,7 +439,7 @@ describe('Lobby', () => {
       'fetch',
       vi.fn(async (url: string) => {
         if (url === `${API_URL}/rooms`) return { json: async () => ({ rooms }) };
-        return { json: async () => ({ roomId: 'room-a', gameType: 'monopoly', spectatorId: 'spectator-9', token: 's-tok' }) };
+        return { json: async () => ({ roomId: 'room-a', roomCode: 'GH1234', gameType: 'monopoly', spectatorId: 'spectator-9', token: 's-tok' }) };
       })
     );
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
@@ -444,7 +448,7 @@ describe('Lobby', () => {
     const buttons = listItem.querySelectorAll('button');
     fireEvent.click(buttons[1]! as HTMLButtonElement); // the Watch button
 
-    await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-a', 'monopoly', 'spectator-9', 's-tok'));
+    await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-a', 'monopoly', 'spectator-9', 's-tok', 'GH1234'));
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/room-a/spectate`, { method: 'POST' });
     expect(onJoinRoom).not.toHaveBeenCalled();
   });
@@ -525,5 +529,61 @@ describe('Lobby', () => {
 
     await screen.findByText('No Scotland Yard rooms right now.');
     expect(screen.getByText('0 live')).toBeInTheDocument();
+  });
+
+  it('shows a room code and an Invite copy button on each public room row (Phase 40)', async () => {
+    const rooms = [
+      {
+        roomId: 'room-a',
+        roomCode: 'M4KQ2V',
+        gameType: 'monopoly',
+        label: 'Monopoly',
+        seats: 2,
+        capacity: 8,
+        connectedCount: 1,
+        availableSeats: 1,
+        status: 'LOBBY',
+        isFull: false,
+        isHotSeat: false,
+        botCount: 0,
+        hasBots: false,
+        spectatorCount: 0,
+      },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ rooms }) }));
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    await screen.findByText(/M4KQ2V/);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Copy invite link for room M4KQ2V' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://localhost:3000/?join=M4KQ2V'));
+    expect(await screen.findByText('Copied!')).toBeInTheDocument();
+  });
+
+  it('auto-joins a room from a ?join=<code> deep link and strips the params (Phase 40)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === `${API_URL}/rooms`) return { json: async () => ({ rooms: [] }) };
+      return { json: async () => ({ roomId: 'room-deep', roomCode: 'ABCDEF', playerId: 'p2', gameType: 'monopoly', sessionToken: 'tok-deep' }) };
+    }));
+    window.history.replaceState({}, '', `/?join=abcdef`);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-deep', ['p2'], 'monopoly', 'tok-deep', 'ABCDEF'));
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/abcdef/join`, { method: 'POST' });
+    // The invite params are cleared so a reload lands on a clean Lobby.
+    expect(window.location.search).toBe('');
+  });
+
+  it('auto-watches a room from a ?watch=<code> deep link (Phase 40)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === `${API_URL}/rooms`) return { json: async () => ({ rooms: [] }) };
+      return { json: async () => ({ roomId: 'room-w', roomCode: 'GH1234', gameType: 'catan', spectatorId: 'spec-7', token: 's-tok' }) };
+    }));
+    window.history.replaceState({}, '', `/?watch=GH1234`);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-w', 'catan', 'spec-7', 's-tok', 'GH1234'));
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/GH1234/spectate`, { method: 'POST' });
   });
 });

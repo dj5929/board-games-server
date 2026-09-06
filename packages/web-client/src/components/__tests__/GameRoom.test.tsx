@@ -277,4 +277,15 @@ describe('GameRoom', () => {
       expect(screen.queryByText(/spectators? watching/)).not.toBeInTheDocument()
     );
   });
+
+  it('renders the room-code invite chip when the server provides one (Phase 40)', async () => {
+    render(<GameRoom roomId="room-1" localPlayerIds={['p1']} sessionToken="tok" roomCode="M4KQ2V" onLeave={onLeave} />);
+    const ws = instances[instances.length - 1]!;
+    act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));
+    await screen.findByText(/p1's Turn/);
+
+    expect(
+      screen.getByRole('button', { name: 'Copy room invite link for code M4KQ2V' })
+    ).toBeInTheDocument();
+  });
 });

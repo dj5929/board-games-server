@@ -12,6 +12,7 @@ interface GameConfig {
   gameType: 'monopoly' | 'catan' | 'scotland-yard';
   sessionToken: string;
   spectatorId?: string;
+  roomCode?: string;
 }
 
 function LoadingFallback() {
@@ -30,6 +31,7 @@ function App() {
     localPlayerIds: gameConfig.localPlayerIds,
     sessionToken: gameConfig.sessionToken,
     spectatorId: gameConfig.spectatorId,
+    roomCode: gameConfig.roomCode,
     onLeave: () => setGameConfig(null)
   } : null;
 
@@ -40,8 +42,8 @@ function App() {
         <Suspense fallback={<LoadingFallback />}>
           {!gameConfig || !roomProps ? (
             <Lobby
-              onJoinRoom={(roomId, localPlayerIds, gameType, sessionToken) => setGameConfig({ roomId, localPlayerIds, gameType, sessionToken })}
-              onSpectate={(roomId, gameType, spectatorId, token) => setGameConfig({ roomId, localPlayerIds: [], gameType, sessionToken: token, spectatorId })}
+              onJoinRoom={(roomId, localPlayerIds, gameType, sessionToken, roomCode) => setGameConfig({ roomId, localPlayerIds, gameType, sessionToken, roomCode })}
+              onSpectate={(roomId, gameType, spectatorId, token, roomCode) => setGameConfig({ roomId, localPlayerIds: [], gameType, sessionToken: token, spectatorId, roomCode })}
             />
           ) : (
             gameConfig.gameType === 'monopoly' ?

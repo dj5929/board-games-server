@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Room, createChatMessage, MAX_CHAT_LENGTH, MAX_CHAT_HISTORY } from '../src/Room';
+import { Room, createChatMessage, MAX_CHAT_LENGTH, MAX_CHAT_HISTORY, generateRoomCode, ROOM_CODE_LENGTH } from '../src/Room';
+import { RedisStore } from '../src/RedisStore';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
 describe('Room', () => {
@@ -611,6 +612,32 @@ describe('Room', () => {
       room.replayChatHistory({ send });
       const frame = JSON.parse(send.mock.calls[0]![0]!);
       expect(frame.messages.map((m: { text: string }) => m.text)).toEqual(['from elsewhere']);
+    });
+  });
+
+  describe('room codes & invite links (Phase 40)', () => {
+    it('generates a shareable code from the unambiguous alphabet (Phase 40)', () => {
+      const room = new Room('code-room', 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2']);
+      expect(room.roomCode).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+      // generateRoomCode() itself is exported for the create-handler guard loop.
+      for (let i = 0; i < 200; i++) {
+        expect(generateRoomCode()).toHaveLength(ROOM_CODE_LENGTH);
+        expect(generateRoomCode()).toMatch(/^[A-HJ-NP-Z2-9]+$/);
+      }
+    });
+
+    it('honors a caller-supplied room code via the options (Phase 40)', () => {
+      const room = new Room('code-custom', 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2'], undefined, { roomCode: 'AAABBB' });
+      expect(room.roomCode).toBe('AAABBB');
+    });
+
+    it('persists the room code for the Redis snapshot round-trip (Phase 40)', async () => {
+      const room = new Room('code-persist', 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2'], undefined, { roomCode: 'KLMNOP' });
+      // writeSnapshot() runs on construction (fresh, non-rehydrated rooms).
+      const raw = await RedisStore.get('room:code-persist');
+      expect(raw).toBeTruthy();
+      expect(JSON.parse(raw!).roomCode).toBe('KLMNOP');
+      await RedisStore.del('room:code-persist');
     });
   });
 });

@@ -7,9 +7,26 @@ import type { PubSubManager, RoomBroadcastMessage, ChatMessage } from './PubSubM
  *  are ever relayed, keeping the broadcast stream light and the log readable. */
 export const MAX_CHAT_LENGTH = 500;
 
-/** How many chat lines are retained for replay to late joiners. Bounded so a
+/** Max lines of history retained for late joiners; bounds memory usage so a
  *  long session can never grow the buffer without limit. */
 export const MAX_CHAT_HISTORY = 50;
+
+/** Alphabet for human-shareable room codes: unambiguous uppercase letters and
+ *  digits (no I/L/O/0/1) so codes are easy to read aloud, type, and paste. */
+const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+/** Length in characters of the generated shareable room code. */
+export const ROOM_CODE_LENGTH = 6;
+
+/** Generate a short, URL-safe room code for shareable invite links. Collisions
+ *  with a live room are guarded against at registration time (RoomManager). */
+export function generateRoomCode(length: number = ROOM_CODE_LENGTH): string {
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += ROOM_CODE_ALPHABET[crypto.randomInt(ROOM_CODE_ALPHABET.length)];
+  }
+  return code;
+}
 
 /** Build a validated ChatMessage from a raw inbound payload, or null when the
  *  payload is not a usable chat line (missing/blank/non-string/oversized text).
@@ -64,6 +81,10 @@ export interface IRoomOptions {
   /** Rooms opted into the public browser directory (`GET /rooms`) so players
    *  can discover and join them from the Lobby without the room id. */
   isPublic?: boolean;
+  /** Human-shareable short code used for invite links (`?join=<code>`).
+   *  Generated from the unambiguous alphabet when not supplied, and persisted /
+   *  restored with the Redis snapshot so rehydrated rooms keep their code. */
+  roomCode?: string;
 }
 
 export class Room<S extends IGameState, A extends IPlayerAction, E extends IGameEvent> {
@@ -103,6 +124,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   public readonly ownerPlayerId: string | null;
   public readonly botSeats: ReadonlySet<string>;
   public readonly isPublic: boolean;
+  public readonly roomCode: string;
 
   constructor(
     public readonly id: string,
@@ -121,6 +143,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     this.ownerPlayerId = options.ownerPlayerId ?? null;
     this.botSeats = new Set(options.botSeats ?? []);
     this.isPublic = options.isPublic ?? false;
+    this.roomCode = options.roomCode ?? generateRoomCode();
     this.isRehydrated = !!initialState;
     // Skip the redundant persistence write on the rehydrate path: loadState()
     // has just read this exact snapshot from the store, so writing it straight
@@ -193,6 +216,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       ownerPlayerId: this.ownerPlayerId,
       botSeats: Array.from(this.botSeats),
       isPublic: this.isPublic,
+      roomCode: this.roomCode,
       turnStartedAt: this.turnStartedAt,
       turnTimeLimitMs: this.turnTimeLimitMs,
       sessionTokens: Array.from(this.sessionTokens.entries()),

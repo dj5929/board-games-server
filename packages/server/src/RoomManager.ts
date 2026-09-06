@@ -12,6 +12,7 @@ type Logger = Pick<typeof console, 'log'>;
 /** A single row of the public room browser (`GET /rooms`). */
 export interface RoomDirectoryEntry {
   roomId: string;
+  roomCode: string;
   gameType: string;
   label: string;
   seats: number;
@@ -29,6 +30,10 @@ export interface RoomDirectoryEntry {
 export class RoomManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private rooms: Map<string, Room<any, any, any>> = new Map();
+  /** Rooms indexed by their human-shareable invite code. Codes are matched
+   *  case-insensitively (uppercased at lookup), so `abc123` and `ABC123` hit
+   *  the same room. */
+  private codeToRoom: Map<string, Room<any, any, any>> = new Map();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private logger: Logger = console;
   private pubsub: PubSubManager;
@@ -54,12 +59,24 @@ export class RoomManager {
       throw new Error('Room capacity reached');
     }
     this.rooms.set(room.id, room);
+    this.codeToRoom.set(room.roomCode, room);
     room.setPubSub(this.pubsub);
     return room.id;
   }
 
   public getRoom(id: string) {
     return this.rooms.get(id);
+  }
+
+  /** Look up a room by its short invite code (case-insensitive). */
+  public getRoomByCode(code: string) {
+    return this.codeToRoom.get(code.trim().toUpperCase());
+  }
+
+  /** Resolve a room from either its full UUID id or its shareable invite code.
+   *  Exact ids win; otherwise the value is treated as an (uppercased) code. */
+  public resolveRoom(idOrCode: string) {
+    return this.getRoom(idOrCode) ?? this.getRoomByCode(idOrCode);
   }
 
   /** Iterate every live room. Used by the BotController sweep. */
@@ -80,6 +97,7 @@ export class RoomManager {
       const availableSeats = room.openSeatCount();
       entries.push({
         roomId: room.id,
+        roomCode: room.roomCode,
         gameType: room.gameType,
         label: config?.label ?? room.gameType,
         seats: state.players.length,
@@ -103,6 +121,9 @@ export class RoomManager {
       room.closeAllConnections();
     }
     this.rooms.delete(id);
+    if (room) {
+      this.codeToRoom.delete(room.roomCode);
+    }
     RedisStore.del(`room:${id}`).catch(err => this.logger.log(`Redis del error: ${err}`));
   }
 
@@ -143,7 +164,8 @@ export class RoomManager {
           ownerPlayerId: data.ownerPlayerId ?? null,
           turnTimeLimitMs: data.turnTimeLimitMs ?? 0,
           botSeats: data.botSeats ?? [],
-          isPublic: data.isPublic === true
+          isPublic: data.isPublic === true,
+          roomCode: data.roomCode
         });
         room.loadState(data);
         room.setPubSub(this.pubsub);
@@ -154,6 +176,7 @@ export class RoomManager {
     for (const res of built) {
       if (res.status === 'fulfilled' && res.value) {
         this.rooms.set(res.value.id, res.value);
+        this.codeToRoom.set(res.value.roomCode, res.value);
         this.logger.log(`[RoomManager] Rehydrated room ${res.value.id} (${res.value.gameType}) from Redis`);
       } else if (res.status === 'rejected') {
         this.logger.log(`[RoomManager] Failed to rehydrate room: ${res.reason}`);
@@ -174,6 +197,7 @@ export class RoomManager {
           this.logger.log(`[RoomManager] Removing idle room ${id} (idle for ${Math.round((now - room.lastActivity) / 1000 / 60)}m)`);
           room.closeAllConnections();
           this.rooms.delete(id);
+          this.codeToRoom.delete(room.roomCode);
           RedisStore.del(`room:${id}`).catch(() => {});
           continue;
         }

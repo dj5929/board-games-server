@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { GAME_CONFIGS, type GameType } from '@packages/engine-core';
+import { inviteLink, copyText } from './RoomInvite';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const ROOM_POLL_MS = 5000;
@@ -7,6 +8,7 @@ const ROOM_POLL_MS = 5000;
 /** A single row of the server's public room browser (`GET /rooms`). */
 export interface RoomSummary {
   roomId: string;
+  roomCode: string;
   gameType: GameType;
   label: string;
   seats: number;
@@ -28,13 +30,14 @@ const GAME_BADGE: Record<GameType, { bg: string; initial: string }> = {
 };
 
 interface Props {
-  onJoinRoom: (roomId: string, localPlayerIds: string[], gameType: GameType, sessionToken: string) => void;
-  onSpectate: (roomId: string, gameType: GameType, spectatorId: string, token: string) => void;
+  onJoinRoom: (roomId: string, localPlayerIds: string[], gameType: GameType, sessionToken: string, roomCode?: string) => void;
+  onSpectate: (roomId: string, gameType: GameType, spectatorId: string, token: string, roomCode?: string) => void;
 }
 
 export function Lobby({ onJoinRoom, onSpectate }: Props) {
   const [joinId, setJoinId] = useState('');
   const [spectateId, setSpectateId] = useState('');
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSpectating, setIsSpectating] = useState(false);
   const [mode, setMode] = useState<'local' | 'online'>('local');
@@ -68,6 +71,25 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
     };
   }, [roomFilter]);
 
+  // Invite deep links (`?join=<CODE>` / `?watch=<CODE>`) auto-join or auto-watch
+  // the target room on load, then strip the query params so a refresh or bookmark
+  // lands on a clean Lobby. Codes work even for rooms hidden from the public
+  // browser — the shareable link is the door.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const joinCode = params.get('join');
+    const watchCode = params.get('watch');
+    if (joinCode) {
+      requestJoin(joinCode.trim());
+    } else if (watchCode) {
+      requestSpectate(watchCode.trim());
+    }
+    if (joinCode || watchCode) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const selectGameType = (type: GameType) => {
     setGameType(type);
     const config = GAME_CONFIGS[type];
@@ -86,7 +108,7 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
 
       const data = await res.json();
       if (data.playerId) {
-        onJoinRoom(targetId, [data.playerId], data.gameType || 'monopoly', data.sessionToken);
+        onJoinRoom(data.roomId ?? targetId, [data.playerId], data.gameType || 'monopoly', data.sessionToken, data.roomCode);
       }
     } catch (e: any) {
       console.error(e);
@@ -103,7 +125,7 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
 
       const data = await res.json();
       if (data.spectatorId) {
-        onSpectate(data.roomId, data.gameType || 'monopoly', data.spectatorId, data.token);
+        onSpectate(data.roomId, data.gameType || 'monopoly', data.spectatorId, data.token, data.roomCode);
       }
     } catch (e: any) {
       console.error(e);
@@ -125,7 +147,7 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
       const data = await res.json();
       if (data.roomId) {
         const localPlayerIds = mode === 'local' ? data.playerIds : [data.playerIds[0]];
-        onJoinRoom(data.roomId, localPlayerIds, data.gameType || gameType, data.sessionToken);
+        onJoinRoom(data.roomId, localPlayerIds, data.gameType || gameType, data.sessionToken, data.roomCode);
       }
     } catch (e) {
       console.error(e);
@@ -140,6 +162,12 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
 
   const handleSpectate = () => {
     if (spectateId) requestSpectate(spectateId.trim());
+  };
+
+  const copyInvite = async (code: string) => {
+    await copyText(inviteLink(code));
+    setCopiedCode(code);
+    window.setTimeout(() => setCopiedCode(prev => (prev === code ? null : prev)), 1500);
   };
 
   return (
@@ -317,23 +345,33 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
                     </p>
                   </div>
                   <div className="flex flex-col gap-1.5 shrink-0">
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => requestJoin(room.roomId)}
+                        disabled={room.availableSeats === 0 || isLoading}
+                        className={`flex-1 px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                          room.availableSeats === 0
+                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                            : 'bg-purple-600 hover:bg-purple-500 text-white'
+                        }`}
+                      >
+                        {room.availableSeats === 0 ? 'Full' : 'Join'}
+                      </button>
+                      <button
+                        onClick={() => requestSpectate(room.roomId)}
+                        disabled={isSpectating}
+                        className="flex-1 px-3 py-1 rounded-lg text-xs font-semibold text-teal-300 bg-teal-900/40 hover:bg-teal-800/60 border border-teal-800 transition-colors"
+                      >
+                        Watch
+                      </button>
+                    </div>
                     <button
-                      onClick={() => requestJoin(room.roomId)}
-                      disabled={room.availableSeats === 0 || isLoading}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                        room.availableSeats === 0
-                          ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                          : 'bg-purple-600 hover:bg-purple-500 text-white'
-                      }`}
+                      type="button"
+                      onClick={() => copyInvite(room.roomCode)}
+                      aria-label={`Copy invite link for room ${room.roomCode}`}
+                      className="text-[10px] px-2 py-0.5 rounded bg-cyan-900/50 text-cyan-300 border border-cyan-800 hover:bg-cyan-800/60 transition-colors"
                     >
-                      {room.availableSeats === 0 ? 'Full' : 'Join'}
-                    </button>
-                    <button
-                      onClick={() => requestSpectate(room.roomId)}
-                      disabled={isSpectating}
-                      className="px-3 py-1 rounded-lg text-xs font-semibold text-teal-300 bg-teal-900/40 hover:bg-teal-800/60 border border-teal-800 transition-colors"
-                    >
-                      Watch
+                      {copiedCode === room.roomCode ? 'Copied!' : `Invite ${room.roomCode}`}
                     </button>
                   </div>
                 </li>
@@ -352,7 +390,7 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
       <div className="flex gap-2">
         <input
           type="text"
-          placeholder="Room ID"
+          placeholder="Room ID or Code"
           value={joinId}
           onChange={(e) => setJoinId(e.target.value)}
           className="flex-1 bg-gray-900 border border-gray-600 rounded-xl px-4 py-2 focus:outline-none focus:border-blue-500 transition-colors"
@@ -373,7 +411,7 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
         <div className="flex gap-2">
           <input
             type="text"
-            placeholder="Room ID to watch"
+            placeholder="Room ID or Code to watch"
             value={spectateId}
             onChange={(e) => setSpectateId(e.target.value)}
             className="flex-1 bg-gray-800 border border-gray-600 rounded-xl px-4 py-2 focus:outline-none focus:border-teal-500 transition-colors"

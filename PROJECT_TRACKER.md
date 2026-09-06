@@ -471,5 +471,26 @@ Late-joining players and spectators now catch up on the room's recent chat, and 
 
 ---
 
+---
+
+## 🟢 Room Invite System & Deep Linking (Phase 40)
+
+Players can now invite friends to specific rooms via 6-character short codes and direct deep links, bypassing the public browser entirely.
+
+### 🟢 Server (`packages/server/src`)
+- **`generateRoomCode`:** `Room` now generates a 6-character collision-resistant short code (e.g., `A8K2M9`, using a curated unambiguous alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789`) on creation, persisted to the Redis snapshot.
+- **`RoomManager.resolveRoom`:** unified lookup method to find a room by either its exact UUID or its 6-character short code.
+- **API Support:** `POST /rooms/:id/join` and `POST /rooms/:id/spectate` now support resolution via both `roomId` or `roomCode`.
+- **Testing (TDD):** `Room.test.ts` (short code generation is exactly 6 chars, draws from the correct alphabet, persists and rehydrates), `RoomManager.test.ts` (finds rooms by both UUID and code).
+
+### 🟢 Client (`packages/web-client/src/components`)
+- **`RoomInvite.tsx`:** New component providing a "Copy Invite Link" (e.g., `?join=A8K2M9` or `?watch=A8K2M9`) button.
+- **Room Integration:** `CatanRoom.tsx`, `GameRoom.tsx`, and `ScotlandYardRoom.tsx` display the room code in the header or sidebar via the `RoomInvite` component.
+- **Deep Linking (`Lobby.tsx`):** Parses `?join=` and `?watch=` URL search parameters on mount, pre-filling the target ID and immediately dispatching a join/spectate API request without requiring a click.
+- **Testing (TDD):** `Lobby.test.tsx` (auto-joins/spectates via query parameters, successfully resolves the `roomCode` property on mocked API responses).
+
+### 🟢 Verification (Phase 40)
+- Full suite green (**36 files / 439 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean, `@packages/server` + `web-client` production builds pass.
+
 ## 🔮 Future Additions (Post-MVP)
 

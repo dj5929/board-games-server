@@ -201,4 +201,50 @@ describe('RoomManager', () => {
     expect(entry.isFull).toBe(false);
     manager.stopCleanup();
   });
+
+  it('looks rooms up by their short code, case-insensitively (Phase 40)', () => {
+    const manager = new RoomManager();
+    const room = makeRoom('code-a');
+    manager.createRoom(room);
+
+    expect(manager.getRoomByCode(room.roomCode)).toBe(room);
+    expect(manager.getRoomByCode(room.roomCode.toLowerCase())).toBe(room);
+    expect(manager.getRoomByCode(`  ${room.roomCode}  `)).toBe(room);
+    expect(manager.getRoomByCode('NNNNNN')).toBeUndefined();
+    manager.stopCleanup();
+  });
+
+  it('resolves rooms by both UUID id and short code (Phase 40)', () => {
+    const manager = new RoomManager();
+    const room = makeRoom('resolve-id');
+    manager.createRoom(room);
+
+    expect(manager.resolveRoom('resolve-id')).toBe(room);
+    expect(manager.resolveRoom(room.roomCode)).toBe(room);
+    expect(manager.resolveRoom(room.roomCode.toLowerCase())).toBe(room);
+    expect(manager.resolveRoom('missing')).toBeUndefined();
+    manager.stopCleanup();
+  });
+
+  it('drops the code index when a room is removed (Phase 40)', () => {
+    const manager = new RoomManager();
+    const room = makeRoom('code-removed');
+    manager.createRoom(room);
+    const code = room.roomCode;
+    expect(manager.getRoomByCode(code)).toBe(room);
+
+    manager.removeRoom('code-removed');
+    expect(manager.getRoomByCode(code)).toBeUndefined();
+    manager.stopCleanup();
+  });
+
+  it('rehydrates a room and keeps its shareable code (Phase 40)', async () => {
+    new Room('restore-code', 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2'], undefined, { roomCode: 'SHARE1' });
+    const manager = new RoomManager();
+    await manager.initFromRedis({ monopoly: MonopolyEngine } as any);
+
+    expect(manager.getRoom('restore-code')?.roomCode).toBe('SHARE1');
+    expect(manager.getRoomByCode('share1')).toBeDefined();
+    manager.stopCleanup();
+  });
 });

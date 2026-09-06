@@ -3,7 +3,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { roomManager } from './RoomManager';
-import { Room, createChatMessage } from './Room';
+import { Room, createChatMessage, generateRoomCode } from './Room';
 import { BotController } from './BotController';
 import { CatanBot } from '@packages/ai';
 import { MonopolyBot } from '@packages/ai';
@@ -114,9 +114,17 @@ export const buildApp = (logger: boolean = true) => {
     // session may act for any seat (see the WS dispatch rule below).
     const isHotSeat = body.hotSeat === true;
     const isPublic = body.isPublic === true;
+
+    // Shareable short code for invite links (`?join=<code>`). Regenerate on the
+    // (astronomically unlikely) collision with a live room's code.
+    let roomCode = generateRoomCode();
+    while (roomManager.getRoomByCode(roomCode)) {
+      roomCode = generateRoomCode();
+    }
+
     const room = new Room<IGameState, IPlayerAction, IGameEvent>(
       roomId, gameType, engine, CryptoRandomProvider, playerIds, undefined,
-      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null, turnTimeLimitMs: TURN_TIME_LIMIT_MS, botSeats, isPublic }
+      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null, turnTimeLimitMs: TURN_TIME_LIMIT_MS, botSeats, isPublic, roomCode }
     );
     roomManager.createRoom(room);
 
@@ -124,7 +132,7 @@ export const buildApp = (logger: boolean = true) => {
     const playerId = playerIds[0]!;
     const sessionToken = room.issueSessionToken(playerId);
 
-    return { roomId, playerIds, gameType, isHotSeat, isPublic, playerId, sessionToken };
+    return { roomId, roomCode, playerIds, gameType, isHotSeat, isPublic, playerId, sessionToken };
   });
 
   fastify.get<{ Querystring: { gameType?: string } }>('/rooms', async (request) => {
@@ -137,8 +145,8 @@ export const buildApp = (logger: boolean = true) => {
   });
 
   fastify.post<{ Params: { roomId: string } }>('/rooms/:roomId/join', async (request, reply) => {
-    const roomId = request.params.roomId;
-    const room = roomManager.getRoom(roomId);
+    // The param accepts either the full UUID id or the shareable invite code.
+    const room = roomManager.resolveRoom(request.params.roomId);
 
     if (!room) {
       return reply.status(404).send({ error: 'Room not found' });
@@ -150,12 +158,12 @@ export const buildApp = (logger: boolean = true) => {
     }
 
     const sessionToken = room.issueSessionToken(availableId);
-    return { playerId: availableId, gameType: room.gameType, sessionToken };
+    return { roomId: room.id, roomCode: room.roomCode, playerId: availableId, gameType: room.gameType, sessionToken };
   });
 
   fastify.post<{ Params: { roomId: string } }>('/rooms/:roomId/spectate', async (request, reply) => {
-    const roomId = request.params.roomId;
-    const room = roomManager.getRoom(roomId);
+    // The param accepts either the full UUID id or the shareable invite code.
+    const room = roomManager.resolveRoom(request.params.roomId);
 
     if (!room) {
       return reply.status(404).send({ error: 'Room not found' });
@@ -164,7 +172,7 @@ export const buildApp = (logger: boolean = true) => {
     // Spectators may watch any room at any time — full games, hot-seat games,
     // bot-filled games — without ever occupying a seat.
     const { spectatorId, token } = room.issueSpectatorToken();
-    return { roomId, gameType: room.gameType, spectatorId, token };
+    return { roomId: room.id, roomCode: room.roomCode, gameType: room.gameType, spectatorId, token };
   });
 
   fastify.register(async function (fastify) {
