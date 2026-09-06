@@ -1,9 +1,25 @@
 import type { Redis } from 'ioredis';
 import { RedisStore } from './RedisStore';
+
+/** A chat line relayed to every player and spectator in a room. Chat is
+ *  in-memory only: it is never persisted to the Redis snapshot and never
+ *  replayed to late joiners. The id is produced by the originating instance and
+ *  used to dedupe the same-instance pub/sub echo. */
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  senderId: string;
+  senderRole: 'player' | 'spectator';
+  text: string;
+  sentAt: number;
+}
+
 export interface RoomBroadcastMessage {
-  state: unknown;
+  state?: unknown;
   events?: unknown[];
   timer?: { turnStartedAt: number; turnTimeLimitMs: number };
+  /** Present on chat-only broadcasts (no state or events are carried). */
+  chat?: ChatMessage;
 }
 
 type Logger = Pick<typeof console, 'log'>;

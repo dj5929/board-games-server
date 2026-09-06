@@ -14,10 +14,16 @@
  *     lands in the game as the second player.
  *  4. After the first player rolls, the entry flips to "Playing", shows
  *     "2/2 seats taken" and a disabled "Full" button.
- *  5. A third browser watches the full room from the directory (Watch button)
+ *  5. Players exchange in-room chat over the live WebSocket (Phase 38).
+ *  6. A third browser watches the full room from the directory (Watch button)
  *     and enters the spectator view.
- *  6. Creating a room with the visibility toggle off sends isPublic:false and
+ *  7. Creating a room with the visibility toggle off sends isPublic:false and
  *     that room never appears in the browser.
+ *  8. The game-type filter pills drive ?gameType= with per-game empty states.
+ *
+ *  (numbered comments below lag by one — a public-room create + spectrum of
+ *   directory steps mean the in-file labels start at 1 while the flow above is
+ *   the authoritative coverage list)
  *
  * Run: node ui-tests/rooms-browser.e2e.mjs   (from repo root, with servers up;
  *      ideally after a restart so the in-memory server starts with no rooms)
@@ -162,6 +168,30 @@ async function main() {
     console.log('4) Browser #1 rolls to start the game (LOBBY -> IN_PROGRESS)');
     await retry(async () => clickEnabledButton(page1, 'Roll Dice'), { label: 'browser #1 roll button to be clickable' });
     await dismissCardModal(page1);
+
+    // -- 4b. In-room chat round-trip over the live socket (Phase 38) --
+    console.log('4b) Browser #2 sends chat; browser #1 sees it, then replies');
+    await clickButtonByText(page2, 'Chat');
+    await page2.type('input[aria-label="Chat message"]', 'gg wp');
+    await page2.keyboard.press('Enter');
+    await clickButtonByText(page1, 'Chat');
+    await retry(async () => {
+      const t = await bodyText(page1);
+      return t.includes('gg wp');
+    }, { label: 'browser #1 to receive browser #2\'s chat line' });
+    await retry(async () => (await bodyText(page2)).includes('gg wp'), {
+      label: 'browser #2 to see its own chat line echoed back',
+    });
+    console.log('   PASS: p2 chat "gg wp" delivered to p1 and echoed to p2');
+
+    await page1.type('input[aria-label="Chat message"]', 'nice roll');
+    await page1.keyboard.press('Enter');
+    await retry(async () => (await bodyText(page2)).includes('nice roll'), {
+      label: 'browser #2 to receive browser #1\'s reply',
+    });
+    console.log('   PASS: p1 reply "nice roll" delivered to p2');
+    await clickButtonByText(page1, 'Hide Chat');
+    await clickButtonByText(page2, 'Hide Chat');
 
     console.log('5) Browser #3 sees the full, playing game with Full + Watch');
     await openLobby(page3);

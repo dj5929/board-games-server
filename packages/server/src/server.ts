@@ -3,7 +3,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { roomManager } from './RoomManager';
-import { Room } from './Room';
+import { Room, createChatMessage } from './Room';
 import { BotController } from './BotController';
 import { CatanBot } from '@packages/ai';
 import { MonopolyBot } from '@packages/ai';
@@ -40,6 +40,36 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN ?? DEFAULT_CORS_ORIGINS.join(','))
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
+
+/** Per-socket token bucket: refills `refillPerSec` tokens each second up to
+ *  `maxBurst`, starting with `initial` tokens. Prevents chat/action spam from
+ *  flooding the broadcast pipeline. */
+function createTokenBucket(maxBurst: number, refillPerSec: number, initial = maxBurst) {
+  let tokens = initial;
+  let lastRefill = Date.now();
+  return {
+    consume(): boolean {
+      const now = Date.now();
+      tokens += Math.floor((now - lastRefill) / 1000) * refillPerSec;
+      if (tokens > maxBurst) tokens = maxBurst;
+      lastRefill = now;
+      if (tokens <= 0) return false;
+      tokens -= 1;
+      return true;
+    }
+  };
+}
+
+/** Handle an inbound CHAT line for an authenticated socket. Invalid lines get an
+ *  ERROR reply to the sender only and are never relayed. */
+function handleChatMessage(room: Room<IGameState, IPlayerAction, IGameEvent>, senderId: string, senderRole: 'player' | 'spectator', socket: { send: (data: string) => void }, raw: unknown) {
+  const message = createChatMessage(raw, senderId, senderRole, room.id);
+  if (!message) {
+    socket.send(JSON.stringify({ type: 'ERROR', error: 'Invalid message' }));
+    return;
+  }
+  room.broadcastChat(message);
+}
 
 export const buildApp = (logger: boolean = true) => {
   const fastify = Fastify({ logger });
@@ -182,6 +212,24 @@ export const buildApp = (logger: boolean = true) => {
           socket.ping();
         }, 30000);
 
+        // Spectators may participate in chat, and only chat: game actions from a
+        // spectator socket are never dispatched and would otherwise be dropped.
+        const spectatorLimiter = createTokenBucket(20, 10, 10);
+        socket.on('message', (message: string) => {
+          if (!spectatorLimiter.consume()) {
+            socket.send(JSON.stringify({ type: 'ERROR', error: 'Rate limit exceeded' }));
+            return;
+          }
+          try {
+            const parsed = JSON.parse(message.toString());
+            if (parsed.type === 'CHAT') {
+              handleChatMessage(room, spectatorId, 'spectator', socket, parsed);
+            }
+          } catch {
+            socket.send(JSON.stringify({ type: 'ERROR', error: 'Invalid payload' }));
+          }
+        });
+
         socket.on('close', (code, reason) => {
           clearInterval(pingInterval);
           fastify.log.info(`[WS] Spectator ${spectatorId} disconnected from room ${roomId}. Code: ${code}, Reason: ${reason}`);
@@ -216,9 +264,6 @@ export const buildApp = (logger: boolean = true) => {
         return;
       }
 
-      let wsTokens = 10;
-      let lastRefill = Date.now();
-      
       let isAlive = true;
       socket.on('pong', () => { isAlive = true; });
       const pingInterval = setInterval(() => {
@@ -231,20 +276,21 @@ export const buildApp = (logger: boolean = true) => {
         socket.ping();
       }, 30000);
 
+      const playerLimiter = createTokenBucket(20, 10, 10);
       socket.on('message', (message: string) => {
-        const now = Date.now();
-        wsTokens += Math.floor((now - lastRefill) / 1000) * 10; // refill 10 tokens per sec
-        if (wsTokens > 20) wsTokens = 20; // max burst 20
-        lastRefill = now;
-        
-        if (wsTokens <= 0) {
+        if (!playerLimiter.consume()) {
            socket.send(JSON.stringify({ type: 'ERROR', error: 'Rate limit exceeded' }));
            return;
         }
-        wsTokens -= 1;
 
         try {
           const parsed = JSON.parse(message.toString());
+          // Chat is not a game action: it is validated and relayed directly,
+          // entirely outside the engine's action schema.
+          if (parsed.type === 'CHAT') {
+            handleChatMessage(room, playerId, 'player', socket, parsed);
+            return;
+          }
           const action = actionSchema.parse(parsed);
           // CRITICAL-1: force playerId to the authenticated socket identity,
           // ignoring any client-supplied value to prevent impersonation.

@@ -428,5 +428,27 @@ A live directory of public rooms in the Lobby transforms the "join by id" hall i
 
 ---
 
+## 🟢 In-Room Chat (Phase 38)
+
+Players **and spectators** chat live inside every game room (Monopoly, Catan, Scotland Yard) over the existing WebSocket/broadcast pipeline. Chat is a room-wide line relay — never a game action, never part of the state or event stream.
+
+### 🟢 Server (`packages/server/src`)
+- **`CHAT` inbound message:** `{ type: 'CHAT', text }`. Players' sockets handle it *before* the game-action schema (`actionSchema`) so it bypasses the engine entirely; spectators — who previously had no inbound handler at all — now get a `CHAT`-only message handler (their `MOVE`/other action frames are still silently dropped). Both paths share the same per-socket token bucket (`createTokenBucket(20, 10, 10)` + refill) so chat/action spam can't flood the pipeline.
+- **Validation (`createChatMessage` + `MAX_CHAT_LENGTH = 500`):** text must be a non-empty string ≤ 500 chars; it is trimmed, and the sender identity is always the authenticated socket id (`playerId` or `spectatorId`) — never client-supplied. Invalid lines send the sender a lone `{ type: 'ERROR', error: 'Invalid message' }` and relay nothing.
+- **Delivery (`Room.broadcastChat`):** every local player and spectator connection receives `{ type: 'CHAT_MESSAGE', message: { id, roomId, senderId, senderRole, text, sentAt } }`. Cross-instance: `PubSubManager.RoomBroadcastMessage` gained an optional `chat` field so chat publishes as a chat-only broadcast (no state/events carried), and `deliverRemoteMessage` re-broadcasts it without touching local game state. A bounded `recentChatIds` set dedupes the same-instance Redis pub/sub echo so no line is double-delivered.
+- **In-memory only:** chat is never written to the Redis snapshot and never replayed to late joiners (matches spectator-token semantics).
+- **Testing (TDD):** `Room.test.ts` +5 (relay to all connections, chat-only pub/sub publish, remote re-broadcast w/o state mutation, same-instance echo dedupe, validation matrix), `server.test.ts` +4 (player chat relayed to players + spectator, spectator chat while actions stay dropped, invalid lines rejected with no state writes, chat leaves game state byte-identical and a `ROLL_DICE` still follows).
+
+### 🟢 Client (`packages/web-client/src/components`)
+- **`RoomChat.tsx`:** shared panel reused by all three rooms — timestamp + sender label (`p2:` for players, `Spectator <short-id>:` for watchers, `You:` for the local session), news scrolling in, 500-char input with a Send button and Enter-to-submit, Close (`aria-label="Close chat"`).
+- **Integration:** `GameRoom`/`CatanRoom`/`ScotlandYardRoom` each append a `CHAT_MESSAGE` branch to their WS handler, expose a **Chat** header/sidebar button toggling the panel, and send `{ type: 'CHAT', text }` on submit.
+- **Testing (TDD):** `GameRoom.test.tsx` +2 — renders messages with the correct `You:`/spectator labels and clears the input; and sends the `CHAT` frame over the socket.
+
+### 🟢 Verification (Phase 38)
+- Full suite green (**34 files / 413 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean (pre-existing dep-array warnings only), `@packages/server` + `web-client` production builds pass.
+- Browser E2E (`ui-tests/rooms-browser.e2e.mjs`) extended with a live chat round-trip: browser #2 (p2) sends "gg wp" over the real WebSocket, browser #1 (p1) sees it and replies "nice roll", both receive their own echoes — full run `RESULT: PASS`, no console/page/network failures.
+
+---
+
 ## 🔮 Future Additions (Post-MVP)
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Room } from '../src/Room';
+import { Room, createChatMessage, MAX_CHAT_LENGTH } from '../src/Room';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
 describe('Room', () => {
@@ -452,5 +452,105 @@ describe('Room', () => {
     expect(room.spectatorConnectionCount()).toBe(1);
     expect(room.playerConnectionCount()).toBe(1);
     expect(room.openSeatCount()).toBe(0);
+  });
+
+  describe('in-room chat (Phase 38)', () => {
+    it('relays a chat line to every player and spectator connection', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-room', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+      const p1Send = vi.fn();
+      const p2Send = vi.fn();
+      const specSend = vi.fn();
+      room.addConnection('p1', { send: p1Send });
+      room.addConnection('p2', { send: p2Send });
+      room.addSpectatorConnection('spectator-1', { send: specSend });
+      p1Send.mockClear();
+      p2Send.mockClear();
+      specSend.mockClear();
+
+      const message = createChatMessage({ text: '  hi everyone ' }, 'p1', 'player', room.id)!;
+      room.broadcastChat(message);
+
+      const frame = JSON.stringify({ type: 'CHAT_MESSAGE', message });
+      expect(p1Send).toHaveBeenCalledTimes(1);
+      expect(p2Send).toHaveBeenCalledTimes(1);
+      expect(specSend).toHaveBeenCalledTimes(1);
+      expect(p1Send.mock.calls[0]![0]).toBe(frame);
+      expect(p2Send.mock.calls[0]![0]).toBe(frame);
+      expect(specSend.mock.calls[0]![0]).toBe(frame);
+    });
+
+    it('publishes only the chat line on the pubsub channel (no state/events)', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-pub', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+      const publish = vi.fn();
+      (room as any).setPubSub({ publish, subscribe: vi.fn(), unsubscribe: vi.fn() });
+
+      const message = createChatMessage({ text: 'hello' }, 'p1', 'player', room.id)!;
+      room.broadcastChat(message);
+
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]![0]).toBe('chat-pub');
+      expect(publish.mock.calls[0]![1]).toEqual({ chat: message });
+    });
+
+    it('re-broadcasts a remote chat line without touching game state', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-remote', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+      const mockSend = vi.fn();
+      room.addConnection('p1', { send: mockSend });
+      mockSend.mockClear();
+
+      const message = createChatMessage({ text: 'from another instance' }, 'p2', 'player', room.id)!;
+      (room as any).deliverRemoteMessage({ chat: message });
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const frame = JSON.parse(mockSend.mock.calls[0]![0]!);
+      expect(frame.type).toBe('CHAT_MESSAGE');
+      expect(frame.message.text).toBe('from another instance');
+      // The remote chat never re-projects or mutates the local game state.
+      expect((room.getState() as any).players[0].position).toBe(0);
+    });
+
+    it('dedupes the same-instance pubsub echo so a line is delivered once', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-echo', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+      const mockSend = vi.fn();
+      room.addConnection('p1', { send: mockSend });
+      mockSend.mockClear();
+
+      const message = createChatMessage({ text: 'no doubles' }, 'p1', 'player', room.id)!;
+      room.broadcastChat(message); // direct local relay
+      (room as any).deliverRemoteMessage({ chat: message }); // same id via the pubsub echo
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it('validates chat lines: trims, and rejects blank, non-string and oversized text', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-val', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+      const ok = createChatMessage({ text: '  hello  ' }, 'p1', 'player', room.id);
+      expect(ok).not.toBeNull();
+      expect(ok!.text).toBe('hello');
+      expect(ok!.senderId).toBe('p1');
+      expect(ok!.senderRole).toBe('player');
+      expect(ok!.roomId).toBe('chat-val');
+
+      expect(createChatMessage({ text: '   ' }, 'p1', 'player', room.id)).toBeNull();
+      expect(createChatMessage({ text: '' }, 'p1', 'player', room.id)).toBeNull();
+      expect(createChatMessage({ text: 42 }, 'p1', 'player', room.id)).toBeNull();
+      expect(createChatMessage(null, 'p1', 'player', room.id)).toBeNull();
+      expect(createChatMessage({}, 'p1', 'player', room.id)).toBeNull();
+      expect(createChatMessage({ text: 'x'.repeat(MAX_CHAT_LENGTH + 1) }, 'p1', 'player', room.id)).toBeNull();
+      expect(createChatMessage({ text: 'x'.repeat(MAX_CHAT_LENGTH) }, 'p1', 'player', room.id)).not.toBeNull();
+
+      const spectatorMsg = createChatMessage({ text: 'watch this' }, 'spectator-1', 'spectator', room.id);
+      expect(spectatorMsg!.senderRole).toBe('spectator');
+      expect(spectatorMsg!.senderId).toBe('spectator-1');
+    });
   });
 });

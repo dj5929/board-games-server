@@ -149,6 +149,59 @@ describe('GameRoom', () => {
     expect(await screen.findByText(/p1 rolled a 7 and landed on/)).toBeInTheDocument();
   });
 
+  it('renders chat messages received from the server (Phase 38)', async () => {
+    const ws = renderRoom();
+    act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));
+    await screen.findByText(/p1's Turn/);
+
+    fireEvent.click(screen.getByText('Chat'));
+    expect(screen.getByText('Room Chat')).toBeInTheDocument();
+    expect(screen.getByText('No messages yet.')).toBeInTheDocument();
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'CHAT_MESSAGE',
+        message: { id: 'c1', roomId: 'room-1', senderId: 'p2', senderRole: 'player', text: 'hello p1!', sentAt: Date.now() },
+      })
+    );
+
+    expect(await screen.findByText('hello p1!')).toBeInTheDocument();
+    expect(screen.getByText('p2:')).toBeInTheDocument();
+
+    // Our own line is labeled "You", a spectator line is labeled "Spectator …".
+    act(() =>
+      ws.simulateMessage({
+        type: 'CHAT_MESSAGE',
+        message: { id: 'c2', roomId: 'room-1', senderId: 'p1', senderRole: 'player', text: 'my own line', sentAt: Date.now() },
+      })
+    );
+    expect(await screen.findByText('my own line')).toBeInTheDocument();
+    expect(screen.getByText('You:')).toBeInTheDocument();
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'CHAT_MESSAGE',
+        message: { id: 'c3', roomId: 'room-1', senderId: 'spectator-abc123', senderRole: 'spectator', text: 'still watching', sentAt: Date.now() },
+      })
+    );
+    expect(await screen.findByText('still watching')).toBeInTheDocument();
+    expect(screen.getByText('Spectator abc123:')).toBeInTheDocument();
+  });
+
+  it('sends a chat line over the socket and clears the input (Phase 38)', async () => {
+    const ws = renderRoom();
+    act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));
+    await screen.findByText(/p1's Turn/);
+
+    fireEvent.click(screen.getByText('Chat'));
+    const input = screen.getByLabelText('Chat message');
+    fireEvent.change(input, { target: { value: 'glhf' } });
+    fireEvent.submit(input.closest('form')!);
+
+    expect(ws.sent).toContain(JSON.stringify({ type: 'CHAT', text: 'glhf' }));
+    expect((input as HTMLInputElement).value).toBe('');
+  });
+
   it('surfaces ERROR messages and returns to the lobby', async () => {
     const ws = renderRoom();
     act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));

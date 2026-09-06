@@ -10,6 +10,7 @@ import { CatanDiscardModal } from './CatanDiscardModal';
 import { CatanRobberVictimModal } from './CatanRobberVictimModal';
 import { CatanDevCardManager } from './CatanDevCardManager';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
+import { RoomChat, type ChatMessage } from './RoomChat';
 import { useToasts } from '../hooks/useToasts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -35,6 +36,8 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, o
   const { toasts, addToast } = useToasts();
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const [showEventLog, setShowEventLog] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [showChat, setShowChat] = useState(false);
   const [diceRoll, setDiceRoll] = useState<{dice1: number, dice2: number} | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [buildMode, setBuildMode] = useState<'SETTLEMENT' | 'ROAD' | 'CITY' | null>(null);
@@ -156,6 +159,8 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, o
             }]);
           }
         });
+      } else if (data.type === 'CHAT_MESSAGE') {
+        setChatMessages(prev => [...prev, data.message]);
       } else if (data.type === 'ERROR') {
         setError(data.error);
         addToast(`Error: ${data.error}`);
@@ -287,6 +292,10 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, o
     wsRef.current?.send(JSON.stringify({ type: 'CANCEL_TRADE', playerId: activePlayerId }));
   };
 
+  const handleSendChat = (text: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'CHAT', text }));
+  };
+
   if (error) {
     return (
       <div className="text-center">
@@ -393,6 +402,9 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, o
           <button onClick={() => setShowEventLog(!showEventLog)} className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
             {showEventLog ? 'Hide Events' : 'Event Log'}
           </button>
+          <button onClick={() => setShowChat(!showChat)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
+            {showChat ? 'Hide Chat' : 'Chat'}
+          </button>
           <button onClick={onLeave} className="text-gray-400 hover:text-white transition-colors underline text-sm ml-2">Leave</button>
         </div>
       </div>
@@ -416,6 +428,16 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, o
             )}
           </div>
         </div>
+      )}
+
+      {showChat && (
+        <RoomChat
+          messages={chatMessages}
+          onSend={handleSendChat}
+          onClose={() => setShowChat(false)}
+          localSenderId={isSpectator ? spectatorId : localPlayerIds[0]}
+          localSenderRole={isSpectator ? 'spectator' : 'player'}
+        />
       )}
 
       <CatanBoard state={state} playerId={activePlayerId} buildMode={placementBuildMode} onVertexClick={handleVertexClick} onEdgeClick={handleEdgeClick} onHexClick={handleHexClick}>

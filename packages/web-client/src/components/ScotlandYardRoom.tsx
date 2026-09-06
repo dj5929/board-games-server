@@ -4,6 +4,7 @@ import { deduceTicketForMove } from '@packages/scotland-yard-engine';
 import { ScotlandYardBoard } from './ScotlandYardBoard';
 import { SoundEngine } from '../utils/SoundEngine';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
+import { RoomChat, type ChatMessage } from './RoomChat';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = API_URL.replace(/^http/, 'ws');
@@ -27,6 +28,8 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
   const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
   const [spectatorCount, setSpectatorCount] = useState(0);
   const [skipNotice, setSkipNotice] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [showChat, setShowChat] = useState(false);
   const isSpectator = !!spectatorId;
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -57,15 +60,17 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
           } else if (ev.type === 'TURN_SKIPPED') {
              setSkipNotice(`${ev.payload.playerId} ran out of time. Turn passed to ${ev.payload.nextPlayerId}.`);
              window.setTimeout(() => setSkipNotice(''), 4000);
-          } else if (ev.type === 'GAME_OVER') {
-             setGameOver({ winner: ev.payload.winner, reason: ev.payload.reason });
-             if (ev.payload.winner === 'DETECTIVE') {
-                SoundEngine.playSiren();
-             } else {
-                SoundEngine.playVictorySound();
-             }
+} else if (ev.type === 'GAME_OVER') {
+          setGameOver({ winner: ev.payload.winner, reason: ev.payload.reason });
+          if (ev.payload.winner === 'DETECTIVE') {
+             SoundEngine.playSiren();
+          } else {
+             SoundEngine.playVictorySound();
           }
+       }
         }
+      } else if (data.type === 'CHAT_MESSAGE') {
+        setChatMessages(prev => [...prev, data.message]);
       }
     };
 
@@ -148,6 +153,10 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
     setPendingDoubleMove(null);
   };
 
+  const handleSendChat = (text: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'CHAT', text }));
+  };
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 text-center">
@@ -166,7 +175,7 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
 
   return (
     <>
-      <div className="w-full max-w-[95vw] h-[calc(100dvh-1.5rem)] flex gap-4 overflow-hidden">
+      <div className="w-full max-w-[95vw] h-[calc(100dvh-1.5rem)] flex gap-4 overflow-hidden relative">
       {/* Sidebar: Turn info & Tickets */}
       <div className="w-96 min-w-96 shrink-0 bg-gray-800 rounded-2xl p-4 flex flex-col shadow-xl border border-gray-700 overflow-y-auto">
          <div className="flex items-center justify-between mb-2 border-b border-gray-700 pb-2">
@@ -325,6 +334,12 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
          </div>
 
          <div className="mt-auto pt-4 border-t border-gray-700 flex flex-col gap-2">
+           <button
+             onClick={() => setShowChat(!showChat)}
+             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded font-semibold border border-emerald-700"
+           >
+             {showChat ? 'Hide Chat' : 'Chat'}
+           </button>
            <button onClick={onLeave} className="w-full bg-red-900/50 hover:bg-red-800 text-red-200 py-2 rounded font-semibold border border-red-800">
              Leave Game
            </button>
@@ -339,6 +354,16 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
          />
       </div>
       </div>
+
+      {showChat && (
+        <RoomChat
+          messages={chatMessages}
+          onSend={handleSendChat}
+          onClose={() => setShowChat(false)}
+          localSenderId={isSpectator ? spectatorId : localPlayerIds[0]}
+          localSenderRole={isSpectator ? 'spectator' : 'player'}
+        />
+      )}
 
       {gameOver && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">

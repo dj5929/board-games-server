@@ -9,6 +9,7 @@ import { SoundEngine } from '../utils/SoundEngine';
 import { Dice3D } from './Dice3D';
 import { RulebookModal } from './RulebookModal';
 import { TurnTimer, type TurnTimerMeta } from './TurnTimer';
+import { RoomChat, type ChatMessage } from './RoomChat';
 import { useToasts } from '../hooks/useToasts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -36,6 +37,8 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, on
   const [drawnCard, setDrawnCard] = useState<{ deck: 'CHANCE' | 'CHEST', text: string } | null>(null);
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const [showEventLog, setShowEventLog] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [showChat, setShowChat] = useState(false);
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
   const [showTradeManager, setShowTradeManager] = useState(false);
   const [showRules, setShowRules] = useState(false);
@@ -148,6 +151,8 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, on
         } else {
           processEvents(data.events);
         }
+      } else if (data.type === 'CHAT_MESSAGE') {
+        setChatMessages(prev => [...prev, data.message]);
       } else if (data.type === 'ERROR') {
         setError(data.error);
       }
@@ -222,6 +227,10 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, on
 
   const handleDeclareBankruptcy = () => {
     wsRef.current?.send(JSON.stringify({ type: 'DECLARE_BANKRUPTCY', playerId: activePlayerId }));
+  };
+
+  const handleSendChat = (text: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'CHAT', text }));
   };
 
   const handleProposeTrade = (trade: any) => {
@@ -317,6 +326,9 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, on
           <button onClick={() => setShowEventLog(!showEventLog)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
             {showEventLog ? 'Hide Events' : 'Event Log'}
           </button>
+          <button onClick={() => setShowChat(!showChat)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
+            {showChat ? 'Hide Chat' : 'Chat'}
+          </button>
           {!isSpectator && (
             <button onClick={() => setShowRestartConfirm(true)} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
               Restart
@@ -345,6 +357,16 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, on
             )}
           </div>
         </div>
+      )}
+
+      {showChat && (
+        <RoomChat
+          messages={chatMessages}
+          onSend={handleSendChat}
+          onClose={() => setShowChat(false)}
+          localSenderId={isSpectator ? spectatorId : localPlayerIds[0]}
+          localSenderRole={isSpectator ? 'spectator' : 'player'}
+        />
       )}
 
       {showRestartConfirm && (

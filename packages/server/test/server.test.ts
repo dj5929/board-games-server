@@ -624,3 +624,121 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     await waitUntil(() => roomRef.spectatorConnections.get(cred.spectatorId) === undefined);
   }, 20000);
 });
+
+describe('in-room chat (Phase 38)', () => {
+  it('relays a player chat line to every player and spectator', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const p1 = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`);
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+
+    const join = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/join` });
+    const p2cred = join.json() as { playerId: string; sessionToken: string };
+    const p2 = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${p2cred.playerId}&token=${p2cred.sessionToken}`);
+    p2.ws.on('error', () => {});
+    await waitForOpen(p2.ws);
+
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: '  hello room  ' }));
+
+    for (const client of [p1, p2, spec]) {
+      await waitUntil(() => client.messages.some(m => JSON.parse(m).type === 'CHAT_MESSAGE'));
+      const frame = client.messages.map(m => JSON.parse(m)).find(m => m.type === 'CHAT_MESSAGE');
+      expect(frame.message.text).toBe('hello room');
+      expect(frame.message.senderId).toBe(room.playerId);
+      expect(frame.message.senderRole).toBe('player');
+      expect(frame.message.roomId).toBe(room.roomId);
+      expect(typeof frame.message.sentAt).toBe('number');
+    }
+  }, 20000);
+
+  it('lets a spectator chat; game actions from a spectator are still dropped', async () => {
+    const room = await createRoom({ gameType: 'scotland-yard', playerCount: 3 });
+    const p1 = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`);
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitUntil(() => p1.messages.length >= 1);
+
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+    await waitUntil(() => spec.messages.length >= 1);
+    // Let the spectator-join STATE_UPDATE (spectatorCount bump) settle on p1 so
+    // the "dropped action" assertion below only compares like-for-like.
+    await waitUntil(() => p1.messages.some(m => JSON.parse(m).spectatorCount === 1));
+
+    // A spectator game action is still silently ignored (chat-only sockets).
+    const p1Before = p1.messages.length;
+    spec.ws.send(JSON.stringify({ type: 'MOVE', playerId: room.playerId, payload: { targetNode: 13, ticketType: 'taxi' } }));
+    await new Promise(r => setTimeout(r, 300));
+    expect(p1.messages.length).toBe(p1Before);
+
+    // ...but their chat is relayed to everyone with the spectator identity.
+    spec.ws.send(JSON.stringify({ type: 'CHAT', text: 'go detectives!' }));
+    await waitUntil(() => p1.messages.some(m => {
+      const d = JSON.parse(m);
+      return d.type === 'CHAT_MESSAGE' && d.message.senderRole === 'spectator';
+    }));
+    const frame = p1.messages.map(m => JSON.parse(m)).find(m => m.type === 'CHAT_MESSAGE' && m.message.senderRole === 'spectator');
+    expect(frame.message.senderId).toBe(cred.spectatorId);
+    expect(frame.message.text).toBe('go detectives!');
+    // The spectator receives their own line back like any other client.
+    await waitUntil(() => spec.messages.some(m => JSON.parse(m).type === 'CHAT_MESSAGE'));
+  }, 20000);
+
+  it('rejects blank, non-string and oversized chat lines without relaying or state writes', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const p1 = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`);
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitUntil(() => p1.messages.length >= 1);
+    const stateCountBefore = p1.messages.map(m => JSON.parse(m)).filter(m => m.type === 'STATE_UPDATE').length;
+
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: '   ' }));
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: 'x'.repeat(501) }));
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: 123 }));
+    p1.ws.send(JSON.stringify({ type: 'CHAT' }));
+
+    await waitUntil(() => p1.messages.some(m => {
+      const d = JSON.parse(m);
+      return d.type === 'ERROR' && d.error === 'Invalid message';
+    }));
+
+    // Nobody received a chat line, and no game state broadcast was triggered.
+    expect(p1.messages.map(m => JSON.parse(m)).some(m => m.type === 'CHAT_MESSAGE')).toBe(false);
+    const stateCountAfter = p1.messages.map(m => JSON.parse(m)).filter(m => m.type === 'STATE_UPDATE').length;
+    expect(stateCountAfter).toBe(stateCountBefore);
+  }, 20000);
+
+  it('chat never mutates game state and the game remains playable', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const p1 = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`);
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitUntil(() => p1.messages.length >= 1);
+
+    const lastState = () => {
+      const states = p1.messages.map(m => JSON.parse(m)).filter(m => m.type === 'STATE_UPDATE');
+      return JSON.stringify(states[states.length - 1]!.state);
+    };
+    const before = lastState();
+
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: 'quick question?' }));
+    await waitUntil(() => p1.messages.some(m => JSON.parse(m).type === 'CHAT_MESSAGE'));
+    expect(p1.messages.map(m => JSON.parse(m)).some(m => m.type === 'EVENTS')).toBe(false);
+    expect(lastState()).toBe(before);
+
+    // The room still accepts real game actions after the chat round-trip.
+    p1.ws.send(JSON.stringify({ type: 'ROLL_DICE', playerId: room.playerId }));
+    await waitUntil(() => p1.messages.some(m => JSON.parse(m).type === 'EVENTS'));
+    const events = p1.messages.map(m => JSON.parse(m)).find(m => m.type === 'EVENTS');
+    expect(events.events.some((e: any) => e.type === 'DICE_ROLLED')).toBe(true);
+  }, 20000);
+});

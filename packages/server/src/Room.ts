@@ -1,7 +1,36 @@
 import { IGameEngine, IGameState, IPlayerAction, IGameEvent, IRandomProvider, playerId } from '@packages/engine-core';
 import crypto from 'node:crypto';
 import { RedisStore, redisReplacer } from './RedisStore';
-import type { PubSubManager, RoomBroadcastMessage } from './PubSubManager';
+import type { PubSubManager, RoomBroadcastMessage, ChatMessage } from './PubSubManager';
+
+/** Hard cap on a single chat line. Longer messages are rejected before they
+ *  are ever relayed, keeping the broadcast stream light and the log readable. */
+export const MAX_CHAT_LENGTH = 500;
+
+/** Build a validated ChatMessage from a raw inbound payload, or null when the
+ *  payload is not a usable chat line (missing/blank/non-string/oversized text).
+ *  The sender identity is supplied by the authenticated socket — never trusted
+ *  from the client message itself. */
+export function createChatMessage(
+  raw: unknown,
+  senderId: string,
+  senderRole: 'player' | 'spectator',
+  roomId: string
+): ChatMessage | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const text = (raw as { text?: unknown }).text;
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_CHAT_LENGTH) return null;
+  return {
+    id: crypto.randomUUID(),
+    roomId,
+    senderId,
+    senderRole,
+    text: trimmed,
+    sentAt: Date.now()
+  };
+}
 
 export interface IClientConnection {
   send(data: string): void;
@@ -36,6 +65,11 @@ export interface IRoomOptions {
 export class Room<S extends IGameState, A extends IPlayerAction, E extends IGameEvent> {
   private state: S;
   private connections: Map<string, IClientConnection> = new Map();
+  /** Chat line ids this instance has already relayed. Room publishes to its own
+   *  Redis channel (so other instances re-broadcast), and Redis delivers the
+   *  message to the publishing instance's own subscriber too — this set lets the
+   *  local instance skip that echo instead of double-delivering a line. */
+  private recentChatIds: Set<string> = new Set();
   /** Spectators observe the game through the hidden-info projection. They never
    *  hold a seat, never receive a session token and can never dispatch actions.
    *  Spectator tokens are in-memory only: like connections, they evaporate on a
@@ -356,11 +390,18 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
 
   /**
    * Deliver a message published by a remote server instance. The message
-   * carries the raw authoritative state plus any events produced by the
-   * originating reduce(). We re-project per local player (state) and
-   * deliver (events), mirroring the local-instance broadcast ordering.
+   *  carries the raw authoritative state plus any events produced by the
+   *  originating reduce(). We re-project per local player (state) and
+   *  deliver (events), mirroring the local-instance broadcast ordering.
    */
   private deliverRemoteMessage(message: RoomBroadcastMessage) {
+    // Chat-only broadcasts never carry state or events.
+    if (message.chat) {
+      if (this.recentChatIds.has(message.chat.id)) return;
+      this.markChatDelivered(message.chat.id);
+      this.broadcastChatRemote(message.chat);
+      return;
+    }
     this.state = message.state as S;
     if (message.events && message.events.length > 0) {
       this.broadcastRemoteState(message.timer);
@@ -475,6 +516,37 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     if (this.pubsub) {
       this.pubsub.publish(this.id, { state: this.state, events, timer: this.timerMeta() });
     }
+  }
+
+  /** Relay one chat line to every local player and spectator, then publish it on
+   *  the room's channel so other server instances deliver it to their own
+   *  connections. Chat never touches the game state or the event stream. */
+  public broadcastChat(message: ChatMessage) {
+    this.markChatDelivered(message.id);
+    this.broadcastChatRemote(message);
+    if (this.pubsub) {
+      this.pubsub.publish(this.id, { chat: message });
+    }
+  }
+
+  /** Re-broadcast a chat line coming from another server instance. */
+  private broadcastChatRemote(message: ChatMessage) {
+    const payload = JSON.stringify({ type: 'CHAT_MESSAGE', message });
+    for (const conn of this.connections.values()) {
+      conn.send(payload);
+    }
+    for (const conn of this.spectatorConnections.values()) {
+      conn.send(payload);
+    }
+  }
+
+  /** Remember that a chat line was already relayed on this instance, capping the
+   *  set so a long session never balloons memory. */
+  private markChatDelivered(id: string) {
+    if (this.recentChatIds.size >= 200) {
+      this.recentChatIds.clear();
+    }
+    this.recentChatIds.add(id);
   }
 
   public getAvailablePlayerId(): string | null {
