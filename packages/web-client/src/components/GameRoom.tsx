@@ -151,6 +151,8 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, on
         } else {
           processEvents(data.events);
         }
+      } else if (data.type === 'CHAT_HISTORY') {
+        setChatMessages(Array.isArray(data.messages) ? data.messages : []);
       } else if (data.type === 'CHAT_MESSAGE') {
         setChatMessages(prev => [...prev, data.message]);
       } else if (data.type === 'ERROR') {

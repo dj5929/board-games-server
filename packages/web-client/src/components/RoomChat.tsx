@@ -17,6 +17,9 @@ interface Props {
   localSenderRole?: 'player' | 'spectator';
 }
 
+/** One-tap quick lines: each chip sends its text via the normal CHAT path. */
+const QUICK_CHIPS = ['👍', '🎉', '😂', '❤️', '🙌'];
+
 function shortSpectatorId(id: string): string {
   const core = id.includes('-') ? id.slice(id.indexOf('-') + 1) : id;
   return core.slice(0, 8);
@@ -65,18 +68,33 @@ export function RoomChat({ messages, onSend, onClose, localSenderId, localSender
           ))
         )}
       </div>
-      <form onSubmit={submit} className="bg-gray-800 p-3 border-t border-gray-700 flex gap-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          maxLength={500}
-          placeholder="Type a message..."
-          aria-label="Chat message"
-          className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-        />
-        <button type="submit" disabled={!draft.trim()} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
-          Send
-        </button>
+      <form onSubmit={submit} className="bg-gray-800 p-3 border-t border-gray-700 flex flex-col gap-2">
+        <div className="flex gap-1.5">
+          {QUICK_CHIPS.map(chip => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => onSend(chip)}
+              aria-label={`Send quick emoji ${chip}`}
+              className="bg-gray-700 hover:bg-gray-600 text-base px-2 py-1 rounded-md transition-colors"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={500}
+            placeholder="Type a message..."
+            aria-label="Chat message"
+            className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+          <button type="submit" disabled={!draft.trim()} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
+            Send
+          </button>
+        </div>
       </form>
     </div>
   );

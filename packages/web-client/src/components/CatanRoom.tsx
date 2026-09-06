@@ -159,6 +159,8 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, o
             }]);
           }
         });
+      } else if (data.type === 'CHAT_HISTORY') {
+        setChatMessages(Array.isArray(data.messages) ? data.messages : []);
       } else if (data.type === 'CHAT_MESSAGE') {
         setChatMessages(prev => [...prev, data.message]);
       } else if (data.type === 'ERROR') {

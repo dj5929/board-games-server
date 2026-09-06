@@ -194,10 +194,13 @@ export const buildApp = (logger: boolean = true) => {
           return;
         }
 
-        room.addSpectatorConnection(spectatorId, {
+        const connection = {
           send: (data: string) => socket.send(data),
           close: () => socket.close()
-        });
+        };
+        room.addSpectatorConnection(spectatorId, connection);
+        // Catch up a late-joining spectator on what was already said.
+        room.replayChatHistory(connection);
         fastify.log.info(`[WS] Spectator ${spectatorId} connected to room ${roomId}`);
 
         let isAlive = true;
@@ -252,10 +255,13 @@ export const buildApp = (logger: boolean = true) => {
         return;
       }
 
-      room.addConnection(playerId, {
+      const connection = {
         send: (data: string) => socket.send(data),
         close: () => socket.close()
-      });
+      };
+      room.addConnection(playerId, connection);
+      // Catch up a late-joining player on what was already said.
+      room.replayChatHistory(connection);
       fastify.log.info(`[WS] Connection established for room ${roomId} player ${playerId}`);
 
       const actionSchema = actionSchemaByGame[room.gameType as keyof typeof actionSchemaByGame];

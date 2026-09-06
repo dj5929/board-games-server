@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Room, createChatMessage, MAX_CHAT_LENGTH } from '../src/Room';
+import { Room, createChatMessage, MAX_CHAT_LENGTH, MAX_CHAT_HISTORY } from '../src/Room';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
 describe('Room', () => {
@@ -551,6 +551,66 @@ describe('Room', () => {
       const spectatorMsg = createChatMessage({ text: 'watch this' }, 'spectator-1', 'spectator', room.id);
       expect(spectatorMsg!.senderRole).toBe('spectator');
       expect(spectatorMsg!.senderId).toBe('spectator-1');
+    });
+
+    it('replays the bounded chat history to a late joiner, point-to-point (Phase 39)', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-hist', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+      const p1Send = vi.fn();
+      room.addConnection('p1', { send: p1Send });
+      p1Send.mockClear();
+
+      room.broadcastChat(createChatMessage({ text: 'first' }, 'p1', 'player', room.id)!);
+      room.broadcastChat(createChatMessage({ text: 'second' }, 'p2', 'player', room.id)!);
+      p1Send.mockClear();
+
+      const lateSend = vi.fn();
+      room.replayChatHistory({ send: lateSend });
+
+      expect(lateSend).toHaveBeenCalledTimes(1);
+      const frame = JSON.parse(lateSend.mock.calls[0]![0]!);
+      expect(frame.type).toBe('CHAT_HISTORY');
+      expect(frame.messages.map((m: { text: string }) => m.text)).toEqual(['first', 'second']);
+
+      // Replay is point-to-point: existing connections are not re-sent anything.
+      expect(p1Send).toHaveBeenCalledTimes(0);
+    });
+
+    it('sends nothing when there is no history to replay (Phase 39)', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-empty', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+      const send = vi.fn();
+      room.replayChatHistory({ send });
+      expect(send).toHaveBeenCalledTimes(0);
+    });
+
+    it('caps the retained history at MAX_CHAT_HISTORY, keeping the most recent (Phase 39)', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-cap', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+      for (let i = 0; i < MAX_CHAT_HISTORY + 5; i++) {
+        room.broadcastChat(createChatMessage({ text: `line-${i}` }, 'p1', 'player', room.id)!);
+      }
+
+      const send = vi.fn();
+      room.replayChatHistory({ send });
+      const frame = JSON.parse(send.mock.calls[0]![0]!);
+      const texts = frame.messages.map((m: { text: string }) => m.text);
+      expect(texts.length).toBe(MAX_CHAT_HISTORY);
+      expect(texts[0]).toBe('line-5');
+      expect(texts[texts.length - 1]).toBe(`line-${MAX_CHAT_HISTORY + 4}`);
+    });
+
+    it('records remote (cross-instance) chat lines into the history too (Phase 39)', () => {
+      const rng = { next: () => 0.5 };
+      const room = new Room('chat-remote-hist', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+      const remote = createChatMessage({ text: 'from elsewhere' }, 'p2', 'player', room.id)!;
+      (room as any).deliverRemoteMessage({ chat: remote });
+
+      const send = vi.fn();
+      room.replayChatHistory({ send });
+      const frame = JSON.parse(send.mock.calls[0]![0]!);
+      expect(frame.messages.map((m: { text: string }) => m.text)).toEqual(['from elsewhere']);
     });
   });
 });

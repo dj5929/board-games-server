@@ -7,6 +7,10 @@ import type { PubSubManager, RoomBroadcastMessage, ChatMessage } from './PubSubM
  *  are ever relayed, keeping the broadcast stream light and the log readable. */
 export const MAX_CHAT_LENGTH = 500;
 
+/** How many chat lines are retained for replay to late joiners. Bounded so a
+ *  long session can never grow the buffer without limit. */
+export const MAX_CHAT_HISTORY = 50;
+
 /** Build a validated ChatMessage from a raw inbound payload, or null when the
  *  payload is not a usable chat line (missing/blank/non-string/oversized text).
  *  The sender identity is supplied by the authenticated socket — never trusted
@@ -70,6 +74,11 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
    *  message to the publishing instance's own subscriber too — this set lets the
    *  local instance skip that echo instead of double-delivering a line. */
   private recentChatIds: Set<string> = new Set();
+  /** Recent chat lines this instance has relayed, kept for replaying to late
+   *  joiners (players and spectators connecting after the lines were sent).
+   *  Ephemeral like connections: history is never persisted to the Redis
+   *  snapshot and evaporates with the room on a server restart. */
+  private chatHistory: ChatMessage[] = [];
   /** Spectators observe the game through the hidden-info projection. They never
    *  hold a seat, never receive a session token and can never dispatch actions.
    *  Spectator tokens are in-memory only: like connections, they evaporate on a
@@ -529,8 +538,13 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     }
   }
 
-  /** Re-broadcast a chat line coming from another server instance. */
+  /** Re-broadcast a chat line coming from the local instance or another server
+   *  instance, and keep it in the bounded history for late-joining clients. */
   private broadcastChatRemote(message: ChatMessage) {
+    this.chatHistory.push(message);
+    if (this.chatHistory.length > MAX_CHAT_HISTORY) {
+      this.chatHistory.shift();
+    }
     const payload = JSON.stringify({ type: 'CHAT_MESSAGE', message });
     for (const conn of this.connections.values()) {
       conn.send(payload);
@@ -538,6 +552,15 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     for (const conn of this.spectatorConnections.values()) {
       conn.send(payload);
     }
+  }
+
+  /** Deliver the bounded recent chat history to a just-connected client so a
+   *  late joiner catches up on what was said before they arrived. Point-to-point:
+   *  only the new connection receives the frame — there is no re-broadcast and
+   *  no pub/sub publish. No-op when nothing has been said yet. */
+  public replayChatHistory(connection: IClientConnection): void {
+    if (this.chatHistory.length === 0) return;
+    connection.send(JSON.stringify({ type: 'CHAT_HISTORY', messages: this.chatHistory.slice() }));
   }
 
   /** Remember that a chat line was already relayed on this instance, capping the

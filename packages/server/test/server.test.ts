@@ -741,4 +741,48 @@ describe('in-room chat (Phase 38)', () => {
     const events = p1.messages.map(m => JSON.parse(m)).find(m => m.type === 'EVENTS');
     expect(events.events.some((e: any) => e.type === 'DICE_ROLLED')).toBe(true);
   }, 20000);
+
+  it('replays the recent chat history to a player and a spectator that connect late (Phase 39)', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const p1 = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`);
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitUntil(() => p1.messages.length >= 1);
+
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: 'greetings' }));
+    await waitUntil(() => p1.messages.some(m => JSON.parse(m).type === 'CHAT_MESSAGE'));
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: 'are you there?' }));
+    await waitUntil(() => p1.messages.filter(m => JSON.parse(m).type === 'CHAT_MESSAGE').length >= 2);
+
+    // A player connecting late is caught up on what was already said.
+    const join = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/join` });
+    const p2cred = join.json() as { playerId: string; sessionToken: string };
+    const p2 = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${p2cred.playerId}&token=${p2cred.sessionToken}`);
+    p2.ws.on('error', () => {});
+    await waitForOpen(p2.ws);
+    await waitUntil(() => p2.messages.some(m => JSON.parse(m).type === 'CHAT_HISTORY'));
+    const hist = p2.messages.map(m => JSON.parse(m)).find(m => m.type === 'CHAT_HISTORY');
+    expect(hist.messages.map((c: { text: string }) => c.text)).toEqual(['greetings', 'are you there?']);
+
+    // A spectator joining even later gets the same history snapshot.
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+    await waitUntil(() => spec.messages.some(m => JSON.parse(m).type === 'CHAT_HISTORY'));
+    const specHist = spec.messages.map(m => JSON.parse(m)).find(m => m.type === 'CHAT_HISTORY');
+    expect(specHist.messages.map((c: { text: string }) => c.text)).toEqual(['greetings', 'are you there?']);
+
+    // Live chat still flows to the late joiners after the catch-up.
+    p1.ws.send(JSON.stringify({ type: 'CHAT', text: 'now live' }));
+    await waitUntil(() => spec.messages.some(m => {
+      const d = JSON.parse(m);
+      return d.type === 'CHAT_MESSAGE' && d.message.text === 'now live';
+    }));
+    await waitUntil(() => p2.messages.some(m => {
+      const d = JSON.parse(m);
+      return d.type === 'CHAT_MESSAGE' && d.message.text === 'now live';
+    }));
+  }, 20000);
 });

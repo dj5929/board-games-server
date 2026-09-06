@@ -14,9 +14,11 @@
  *     lands in the game as the second player.
  *  4. After the first player rolls, the entry flips to "Playing", shows
  *     "2/2 seats taken" and a disabled "Full" button.
- *  5. Players exchange in-room chat over the live WebSocket (Phase 38).
+ *  5. Players exchange in-room chat over the live WebSocket (Phase 38),
+ *     including a quick-emoji chip (Phase 39).
  *  6. A third browser watches the full room from the directory (Watch button)
- *     and enters the spectator view.
+ *     and enters the spectator view, getting caught up on the room's chat
+ *     history that was sent before they connected (Phase 39).
  *  7. Creating a room with the visibility toggle off sends isPublic:false and
  *     that room never appears in the browser.
  *  8. The game-type filter pills drive ?gameType= with per-game empty states.
@@ -190,6 +192,23 @@ async function main() {
       label: 'browser #2 to receive browser #1\'s reply',
     });
     console.log('   PASS: p1 reply "nice roll" delivered to p2');
+
+    // Emoji quick-send chip (Phase 39): one tap sends the line via CHAT.
+    await clickByAriaLabel(page1, 'Send quick emoji 👍');
+    await retry(async () => (await bodyText(page2)).includes('👍'), {
+      label: 'browser #2 to receive the quick emoji line',
+    });
+    console.log('   PASS: p1 quick-emoji "👍" delivered to p2');
+
+    // Leave a legacy marker on the wire; the late-joining spectator (step 6)
+    // must be caught up on it via CHAT_HISTORY replay.
+    await page2.type('input[aria-label="Chat message"]', 'glhf');
+    await page2.keyboard.press('Enter');
+    await retry(async () => (await bodyText(page1)).includes('glhf'), {
+      label: 'browser #1 to receive the "glhf" line',
+    });
+    console.log('   PASS: p2 legacy line "glhf" delivered before the spectator joins');
+
     await clickButtonByText(page1, 'Hide Chat');
     await clickButtonByText(page2, 'Hide Chat');
 
@@ -220,6 +239,15 @@ async function main() {
       label: 'live spectator count of 1',
     });
     console.log('   PASS: browser #3 entered spectator view and sees "1 spectator watching"');
+
+    // Late-joining spectator is caught up on the room's chat history (Phase 39).
+    await clickButtonByText(page3, 'Chat');
+    await retry(async () => {
+      const t = await bodyText(page3);
+      return t.includes('glhf') && t.includes('nice roll');
+    }, { label: 'spectator to receive the CHAT_HISTORY replay on connect' });
+    console.log('   PASS: spectator #3 sees the chat history from before they joined');
+    await clickButtonByText(page3, 'Hide Chat');
 
     // -- 6. Private rooms never appear in the browser --
     console.log('7) Browser #3 creates a PRIVATE room and confirms it stays hidden');

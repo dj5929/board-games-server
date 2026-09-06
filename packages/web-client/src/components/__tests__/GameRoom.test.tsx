@@ -188,6 +188,39 @@ describe('GameRoom', () => {
     expect(screen.getByText('Spectator abc123:')).toBeInTheDocument();
   });
 
+  it('renders the caught-up chat history and keeps live lines flowing (Phase 39)', async () => {
+    const ws = renderRoom();
+    act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));
+    await screen.findByText(/p1's Turn/);
+    fireEvent.click(screen.getByText('Chat'));
+
+    // History sent at connect time replaces the (empty) list, oldest first.
+    act(() =>
+      ws.simulateMessage({
+        type: 'CHAT_HISTORY',
+        messages: [
+          { id: 'h1', roomId: 'room-1', senderId: 'p2', senderRole: 'player', text: 'before you joined', sentAt: Date.now() },
+          { id: 'h2', roomId: 'room-1', senderId: 'spectator-abc123', senderRole: 'spectator', text: 'i was watching', sentAt: Date.now() },
+        ],
+      })
+    );
+    expect(await screen.findByText('before you joined')).toBeInTheDocument();
+    expect(screen.getByText('i was watching')).toBeInTheDocument();
+
+    // A fresh history replaces rather than appends (reconnect catch-up).
+    act(() =>
+      ws.simulateMessage({ type: 'CHAT_HISTORY', messages: [{ id: 'h3', roomId: 'room-1', senderId: 'p1', senderRole: 'player', text: 'reconnected me', sentAt: Date.now() }] })
+    );
+    expect(await screen.findByText('reconnected me')).toBeInTheDocument();
+    expect(screen.queryByText('before you joined')).not.toBeInTheDocument();
+
+    // Live lines still append after the catch-up.
+    act(() =>
+      ws.simulateMessage({ type: 'CHAT_MESSAGE', message: { id: 'c1', roomId: 'room-1', senderId: 'p2', senderRole: 'player', text: 'right back', sentAt: Date.now() } })
+    );
+    expect(await screen.findByText('right back')).toBeInTheDocument();
+  });
+
   it('sends a chat line over the socket and clears the input (Phase 38)', async () => {
     const ws = renderRoom();
     act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));

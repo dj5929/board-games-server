@@ -450,5 +450,26 @@ Players **and spectators** chat live inside every game room (Monopoly, Catan, Sc
 
 ---
 
+## 🟢 Chat Polish (Phase 39)
+
+Late-joining players and spectators now catch up on the room's recent chat, and the panel gains a one-tap quick-emoji row — a polish pass over Phase 38's in-room chat.
+
+### 🟢 Server (`packages/server/src`)
+- **Bounded `chatHistory`:** `Room` now keeps the last `MAX_CHAT_HISTORY = 50` lines (ring buffer, oldest evicted) in memory. Every line relayed through `broadcastChatRemote` (the common sink for local `broadcastChat` and cross-instance `deliverRemoteMessage`) is pushed into the buffer — no new code-path is needed for cross-instance lines.
+- **`replayChatHistory(connection)`:** on a fresh player or spectator WebSocket connect, after the initial `STATE_UPDATE`, the server sends a single point-to-point `{ type: 'CHAT_HISTORY', messages: ChatMessage[] }` frame containing the retained snapshot. No re-broadcast, no pub/sub, no-op when the history is empty.
+- **In-memory only (unchanged):** chat history evaporates with the room on a server restart, exactly like spectator tokens and connection state.
+- **Testing (TDD):** `Room.test.ts` +4 (history replays to a late joiner in order without nudging existing connections; empty history sends nothing; buffer is capped at `MAX_CHAT_HISTORY` with the oldest lines evicted; cross-instance remote lines are also captured), `server.test.ts` +1 (a player and a spectator that connect after two lines are sent both receive the full `CHAT_HISTORY` frame over the real WebSocket, and live lines still flow afterwards).
+
+### 🟢 Client (`packages/web-client/src/components`)
+- **`CHAT_HISTORY` handling:** `GameRoom`/`CatanRoom`/`ScotlandYardRoom` now recognise `{ type: 'CHAT_HISTORY', messages }` — the list is replaced (not appended) so a reconnect always produces a clean snapshot, while live `CHAT_MESSAGE` lines continue to append as before.
+- **`RoomChat.tsx` quick-emoji chips:** a new row of one-tap buttons (`👍 🎉 😂 ❤️ 🙌`, each `type="button"` with an explicit `aria-label`) sits above the text input; each chip calls `onSend(emoji)` directly — no draft required, no server changes needed (reuses the existing `CHAT` pipeline).
+- **Testing (TDD):** `RoomChat.test.tsx` (new file — 4 tests: renders the empty state plus sender labels; typed text is sent and the draft clears; a quick-emoji chip triggers `onSend` with the emoji; the Close button fires `onClose`), `GameRoom.test.tsx` +1 (sends `CHAT_HISTORY` and asserts the list replaces rather than appends, then a live `CHAT_MESSAGE` still renders).
+
+### 🟢 Verification (Phase 39)
+- Full suite green (**35 files / 423 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean (pre-existing dep-array warnings only), `@packages/server` + `web-client` production builds pass.
+- Browser E2E (`ui-tests/rooms-browser.e2e.mjs`) extended again: browser #1 sends a quick-emoji "👍" chip (browser #2 sees it), then browser #2 sends a legacy "glhf" line; browser #3 later spectates the full room from the directory, opens Chat, and sees the room's chat history (`glhf` + `nice roll`) delivered automatically on connect — full run `RESULT: PASS`, no console/page/network failures.
+
+---
+
 ## 🔮 Future Additions (Post-MVP)
 

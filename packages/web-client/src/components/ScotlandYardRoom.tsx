@@ -69,6 +69,8 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
           }
        }
         }
+      } else if (data.type === 'CHAT_HISTORY') {
+        setChatMessages(Array.isArray(data.messages) ? data.messages : []);
       } else if (data.type === 'CHAT_MESSAGE') {
         setChatMessages(prev => [...prev, data.message]);
       }
