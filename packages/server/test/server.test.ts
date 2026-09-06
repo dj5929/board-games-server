@@ -38,7 +38,7 @@ function waitUntil(cond: () => boolean, timeoutMs = 8000): Promise<void> {
   });
 }
 
-async function createRoom(payload: { gameType?: string; playerCount?: number; hotSeat?: boolean; bots?: string[] } = {}) {
+async function createRoom(payload: { gameType?: string; playerCount?: number; hotSeat?: boolean; bots?: string[]; isPublic?: boolean } = {}) {
   const res = await app.inject({ method: 'POST', url: '/rooms', payload });
   expect(res.statusCode).toBe(200);
   return res.json() as {
@@ -48,6 +48,7 @@ async function createRoom(payload: { gameType?: string; playerCount?: number; ho
     playerId: string;
     sessionToken: string;
     isHotSeat?: boolean;
+    isPublic?: boolean;
   };
 }
 
@@ -146,6 +147,108 @@ describe('POST /rooms', () => {
     expect(internal.isBot('p2')).toBe(true);
     expect(internal.isBot('ghost')).toBe(false);
   });
+
+  it('flags a room as public when requested (Phase 37)', async () => {
+    const pub = await createRoom({ playerCount: 2, isPublic: true });
+    expect(pub.isPublic).toBe(true);
+
+    const priv = await createRoom({ playerCount: 2 });
+    expect(priv.isPublic).toBe(false);
+
+    roomManager.removeRoom(pub.roomId);
+    roomManager.removeRoom(priv.roomId);
+  });
+});
+
+describe('GET /rooms', () => {
+  function removeRoom(roomId: string) {
+    roomManager.removeRoom(roomId);
+  }
+
+  async function listRooms(gameType?: string) {
+    const res = await app.inject({ method: 'GET', url: gameType ? `/rooms?gameType=${gameType}` : '/rooms' });
+    expect(res.statusCode).toBe(200);
+    return res.json().rooms as Array<Record<string, any>>;
+  }
+
+  it('lists only public rooms with directory metadata (Phase 37)', async () => {
+    const pub = await createRoom({ gameType: 'monopoly', playerCount: 2, isPublic: true });
+    const priv = await createRoom({ gameType: 'catan', playerCount: 3 }); // private -> excluded
+
+    const rooms = await listRooms();
+    const entry = rooms.find(r => r.roomId === pub.roomId);
+    expect(entry).toBeDefined();
+    expect(rooms.some(r => r.roomId === priv.roomId)).toBe(false);
+
+    expect(entry!.gameType).toBe('monopoly');
+    expect(entry!.label).toBe('Monopoly');
+    expect(entry!.seats).toBe(2);
+    expect(entry!.capacity).toBe(8);
+    // Creator holds p1; one seat remains claimable.
+    expect(entry!.connectedCount).toBe(0);
+    expect(entry!.availableSeats).toBe(1);
+    expect(entry!.isFull).toBe(false);
+    expect(entry!.status).toBe('LOBBY');
+    expect(entry!.isHotSeat).toBe(false);
+    expect(entry!.botCount).toBe(0);
+    expect(entry!.hasBots).toBe(false);
+    expect(entry!.spectatorCount).toBe(0);
+
+    removeRoom(pub.roomId);
+    removeRoom(priv.roomId);
+  });
+
+  it('tracks available seats as joiners claim them (Phase 37)', async () => {
+    const room = await createRoom({ playerCount: 4, isPublic: true });
+    await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/join` });
+
+    const rooms = await listRooms();
+    const entry = rooms.find(r => r.roomId === room.roomId)!;
+    expect(entry.availableSeats).toBe(2);
+    expect(entry.connectedCount).toBe(0);
+
+    removeRoom(room.roomId);
+  });
+
+  it('reflects bot seats, hot-seat rooms and spectators in the directory (Phase 37)', async () => {
+    const room = await createRoom({ playerCount: 3, hotSeat: true, bots: ['p3'], isPublic: true });
+
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+    await waitUntil(() => spec.messages.length >= 1);
+
+    const rooms = await listRooms();
+    const entry = rooms.find(r => r.roomId === room.roomId)!;
+    expect(entry.isHotSeat).toBe(true);
+    expect(entry.botCount).toBe(1);
+    expect(entry.hasBots).toBe(true);
+    // p1 creator + p3 bot claim two seats; p2 stays open.
+    expect(entry.availableSeats).toBe(1);
+    expect(entry.spectatorCount).toBe(1);
+
+    spec.ws.close();
+    await waitUntil(() => (roomManager.getRoom(room.roomId) as any).spectatorConnections.size === 0);
+    removeRoom(room.roomId);
+  });
+
+  it('filters the directory by game type (Phase 37)', async () => {
+    const mono = await createRoom({ gameType: 'monopoly', playerCount: 2, isPublic: true });
+    const catan = await createRoom({ gameType: 'catan', playerCount: 3, isPublic: true });
+
+    const monopoly = await listRooms('monopoly');
+    expect(monopoly.some(r => r.roomId === mono.roomId)).toBe(true);
+    expect(monopoly.some(r => r.roomId === catan.roomId)).toBe(false);
+
+    const catanRooms = await listRooms('catan');
+    expect(catanRooms.some(r => r.roomId === catan.roomId)).toBe(true);
+    expect(catanRooms.some(r => r.roomId === mono.roomId)).toBe(false);
+
+    removeRoom(mono.roomId);
+    removeRoom(catan.roomId);
+  });
 });
 
 describe('POST /rooms/:roomId/join', () => {
@@ -174,6 +277,30 @@ describe('POST /rooms/:roomId/join', () => {
   });
 });
 
+describe('POST /rooms/:roomId/spectate', () => {
+  it('returns a 404 for a missing room', async () => {
+    const res = await app.inject({ method: 'POST', url: '/rooms/no-such-room/spectate' });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'Room not found' });
+  });
+
+  it('issues a spectator credential without consuming a seat', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const res = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { roomId: string; gameType: string; spectatorId: string; token: string };
+    expect(body.roomId).toBe(room.roomId);
+    expect(body.gameType).toBe('monopoly');
+    expect(body.spectatorId).toMatch(/^spectator-/);
+    expect(body.token).toBeTruthy();
+
+    // The room still has its full set of seats open: spectators never occupy one.
+    const join = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/join` });
+    expect(join.statusCode).toBe(200);
+    expect(join.json().playerId).toBe('p2');
+  });
+});
+
 describe('WebSocket /rooms/:roomId/ws', () => {
   it('closes with 1008 when the room does not exist', async () => {
     const ws = new WebSocket(`${baseWsUrl}/rooms/nope/ws?playerId=p1&token=t`);
@@ -183,13 +310,13 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     expect(reason).toBe('Room not found');
   });
 
-  it('closes with 1008 when playerId and token are missing', async () => {
+  it('closes with 1008 when playerId/spectatorId and token are missing', async () => {
     const room = await createRoom();
     const ws = new WebSocket(`${baseWsUrl}/rooms/${room.roomId}/ws`);
     ws.on('error', () => {});
     const { code, reason } = await waitForClose(ws);
     expect(code).toBe(1008);
-    expect(reason).toBe('playerId and token required in query');
+    expect(reason).toBe('playerId/spectatorId and token required in query');
   });
 
   it('closes with 1008 when the session token is invalid', async () => {
@@ -367,5 +494,133 @@ describe('WebSocket /rooms/:roomId/ws', () => {
     await waitUntil(() => roomRef.connections.get(room.playerId) === undefined);
     expect(roomRef.connections.get(p2.playerId)).toBeDefined();
     conn2.ws.close();
+  }, 20000);
+
+  it('closes with 1008 for an invalid spectator token (Phase 36)', async () => {
+    const room = await createRoom();
+    const ws = new WebSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=spectator-1&token=wrong`);
+    ws.on('error', () => {});
+    const { code, reason } = await waitForClose(ws);
+    expect(code).toBe(1008);
+    expect(reason).toBe('Invalid session token');
+  });
+
+  it('shows a hidden-info projection to a spectator and ignores their messages (Phase 36)', async () => {
+    const room = await createRoom({ gameType: 'scotland-yard', playerCount: 3 });
+    const p1 = openSocket(
+      `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`
+    );
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitUntil(() => p1.messages.length >= 1);
+
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+    await waitUntil(() => spec.messages.length >= 1);
+
+    // A player (Mr X) sees his real position; the spectator must not.
+    const playerState = JSON.parse(p1.messages[0]!);
+    const playerMrX = playerState.state.players.find((p: any) => p.role === 'MR_X');
+    expect(playerMrX.position).not.toBe(0);
+
+    const specState = JSON.parse(spec.messages[0]!);
+    expect(specState.type).toBe('STATE_UPDATE');
+    const specMrX = specState.state.players.find((p: any) => p.role === 'MR_X');
+    expect(specMrX.position).toBe(0);
+
+    // Spectator messages are dropped entirely: no dispatch, no feedback.
+    // (Settle briefly: the spectator's connect broadcast also reaches p1.)
+    await new Promise(r => setTimeout(r, 400));
+    const specBefore = spec.messages.length;
+    const p1Before = p1.messages.length;
+    spec.ws.send(JSON.stringify({ type: 'MOVE', playerId: room.playerId, payload: { targetNode: 13, ticketType: 'taxi' } }));
+    await new Promise(r => setTimeout(r, 500));
+    expect(spec.messages.length).toBe(specBefore);
+    expect(p1.messages.length).toBe(p1Before);
+    spec.ws.close();
+    p1.ws.close();
+  }, 20000);
+
+  it('streams action broadcasts and events to a spectator (Phase 36)', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const p1 = openSocket(
+      `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`
+    );
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitUntil(() => p1.messages.length >= 1);
+
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+    await waitUntil(() => spec.messages.length >= 1);
+
+    const specBefore = spec.messages.length;
+    p1.ws.send(JSON.stringify({ type: 'ROLL_DICE', playerId: room.playerId }));
+
+    await waitUntil(() => spec.messages.some(m => JSON.parse(m).type === 'EVENTS'));
+    const events = spec.messages
+      .map(m => JSON.parse(m))
+      .find(m => m.type === 'EVENTS');
+    expect(events.events.some((e: any) => e.type === 'DICE_ROLLED')).toBe(true);
+    // The spectator gets the new state too, not just events.
+    expect(JSON.parse(spec.messages[specBefore]!).type).toBe('STATE_UPDATE');
+    spec.ws.close();
+    p1.ws.close();
+  }, 20000);
+
+  it('streams a live spectator count to players over the socket (Phase 36)', async () => {
+    const room = await createRoom({ playerCount: 2 });
+    const p1 = openSocket(
+      `${baseWsUrl}/rooms/${room.roomId}/ws?playerId=${room.playerId}&token=${room.sessionToken}`
+    );
+    p1.ws.on('error', () => {});
+    await waitForOpen(p1.ws);
+    await waitUntil(() => p1.messages.length >= 1);
+
+    const initial = JSON.parse(p1.messages[0]!);
+    expect(initial.spectatorCount).toBe(0);
+
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+    await waitUntil(() => p1.messages.some(m => JSON.parse(m).spectatorCount === 1));
+
+    const joined = p1.messages.map(m => JSON.parse(m)).find(m => m.spectatorCount === 1);
+    expect(joined.type).toBe('STATE_UPDATE');
+
+    const joinedIndex = p1.messages.length;
+    spec.ws.close();
+    // Leaving rebroadcasts so the count drops back to 0 for the player.
+    await waitUntil(() => {
+      for (let i = joinedIndex; i < p1.messages.length; i++) {
+        if (JSON.parse(p1.messages[i]!).spectatorCount === 0) return true;
+      }
+      return false;
+    });
+    p1.ws.close();
+  }, 20000);
+
+  it('removes the spectator from the room when the socket closes (Phase 36)', async () => {
+    const room = await createRoom();
+    const spectate = await app.inject({ method: 'POST', url: `/rooms/${room.roomId}/spectate` });
+    const cred = spectate.json() as { spectatorId: string; token: string };
+    const spec = openSocket(`${baseWsUrl}/rooms/${room.roomId}/ws?spectatorId=${cred.spectatorId}&token=${cred.token}`);
+    spec.ws.on('error', () => {});
+    await waitForOpen(spec.ws);
+    await waitUntil(() => spec.messages.length >= 1);
+
+    const roomRef = roomManager.getRoom(room.roomId) as any;
+    expect(roomRef.spectatorConnections.get(cred.spectatorId).send).toBeInstanceOf(Function);
+
+    spec.ws.close();
+    await waitUntil(() => roomRef.spectatorConnections.get(cred.spectatorId) === undefined);
   }, 20000);
 });

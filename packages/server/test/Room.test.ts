@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Room } from '../src/Room';
 import { MonopolyEngine } from '@packages/monopoly-engine';
+import { ScotlandYardEngine } from '@packages/scotland-yard-engine';
 describe('Room', () => {
   it('should initialize state correctly', () => {
     const rng = { next: () => 0.5 };
@@ -320,5 +321,136 @@ describe('Room', () => {
 
     expect(restored.isBot('p2')).toBe(true);
     expect(restored.isBot('p1')).toBe(false);
+  });
+
+  it('issues one-time spectator tokens and verifies them (Phase 36)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('spec-token', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const creds = room.issueSpectatorToken();
+    expect(creds.spectatorId).toMatch(/^spectator-/);
+    expect(creds.token).toBeTruthy();
+    expect(room.verifySpectatorToken(creds.spectatorId, creds.token)).toBe(true);
+    expect(room.verifySpectatorToken(creds.spectatorId, 'wrong')).toBe(false);
+    expect(room.verifySpectatorToken('spectator-ghost', creds.token)).toBe(false);
+  });
+
+  it('streams the fully-hidden projection to a spectator while players get their own (Phase 36)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('spec-proj', 'scotland-yard', ScotlandYardEngine as any, rng, ['p1', 'p2', 'p3']);
+
+    const rawMrX = (room.getState() as any).players.find((p: any) => p.role === 'MR_X');
+    expect(rawMrX.position).not.toBe(0);
+
+    const playerSend = vi.fn();
+    const spectatorSend = vi.fn();
+    // p1 is Mr. X: he sees his real position.
+    room.addConnection('p1', { send: playerSend });
+    // A spectator must never see the real position.
+    room.addSpectatorConnection('spectator-1', { send: spectatorSend });
+
+    const playerPayload = JSON.parse(playerSend.mock.calls[0]![0]!);
+    expect(playerPayload.type).toBe('STATE_UPDATE');
+    expect(playerPayload.state.players.find((p: any) => p.id === 'p1').position).toBe(rawMrX.position);
+
+    const spectatorPayload = JSON.parse(spectatorSend.mock.calls[0]![0]!);
+    expect(spectatorPayload.type).toBe('STATE_UPDATE');
+    const projectedMrX = spectatorPayload.state.players.find((p: any) => p.role === 'MR_X');
+    expect(projectedMrX.position).toBe(0);
+  });
+
+  it('never hands a spectator a seat and keeps the room full', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('spec-seat', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+    room.issueSessionToken('p1');
+
+    room.addSpectatorConnection('spectator-1', { send: vi.fn() });
+    expect(room.getAvailablePlayerId()).toBe('p2');
+    expect(room.hasPlayer('spectator-1')).toBe(false);
+  });
+
+  it('keeps the pubsub subscription alive while a spectator remains after the last player leaves (Phase 36)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('spec-ps', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const subscribe = vi.fn();
+    const unsubscribe = vi.fn();
+    (room as any).setPubSub({ subscribe, unsubscribe, publish: vi.fn() });
+
+    room.addSpectatorConnection('spectator-1', { send: vi.fn() });
+    expect(subscribe).toHaveBeenCalledTimes(1);
+
+    room.addConnection('p1', { send: vi.fn() });
+    room.removeConnection('p1');
+    // A spectator is still connected, so the remote stream must keep flowing.
+    expect(unsubscribe).not.toHaveBeenCalled();
+
+    room.removeSpectatorConnection('spectator-1');
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribe.mock.calls[0]![0]).toBe('spec-ps');
+  });
+
+  it('includes and live-updates the spectator count in STATE_UPDATE (Phase 36)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('spec-count', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const playerSend = vi.fn();
+    const spectatorSend = vi.fn();
+    room.addConnection('p1', { send: playerSend });
+
+    const initial = JSON.parse(playerSend.mock.calls[0]![0]!);
+    expect(initial.spectatorCount).toBe(0);
+
+    playerSend.mockClear();
+    room.addSpectatorConnection('spectator-1', { send: spectatorSend });
+    // Joining bumps the count for existing players and the newcomer alike.
+    const p1Join = JSON.parse(playerSend.mock.calls[0]![0]!);
+    expect(p1Join.spectatorCount).toBe(1);
+    const specJoin = JSON.parse(spectatorSend.mock.calls[0]![0]!);
+    expect(specJoin.spectatorCount).toBe(1);
+
+    playerSend.mockClear();
+    room.removeSpectatorConnection('spectator-1');
+    // Leaving rebroadcasts so the count falls back to 0 for remaining players.
+    const p1Leave = JSON.parse(playerSend.mock.calls[0]![0]!);
+    expect(p1Leave.spectatorCount).toBe(0);
+  });
+
+  it('closes spectator connections via closeAllConnections (Phase 36)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('spec-close', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2']);
+
+    const playerClose = vi.fn();
+    const spectatorClose = vi.fn();
+    room.addConnection('p1', { send: vi.fn(), close: playerClose });
+    room.addSpectatorConnection('spectator-1', { send: vi.fn(), close: spectatorClose });
+
+    (room as any).closeAllConnections();
+
+    expect(playerClose).toHaveBeenCalledTimes(1);
+    expect(spectatorClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes the room-browser helpers: public flag and live occupancy (Phase 37)', () => {
+    const rng = { next: () => 0.5 };
+    const room = new Room('dir', 'monopoly', MonopolyEngine as any, rng, ['p1', 'p2'], undefined, {
+      isPublic: true,
+      botSeats: ['p2']
+    });
+
+    // p2 is a bot seat, so only p1 is claimable while the room is untouched.
+    expect(room.isPublic).toBe(true);
+    expect(room.openSeatCount()).toBe(1);
+
+    room.addConnection('p1', { send: vi.fn() });
+    expect(room.playerConnectionCount()).toBe(1);
+    expect(room.spectatorConnectionCount()).toBe(0);
+    expect(room.openSeatCount()).toBe(0);
+
+    room.addSpectatorConnection('spectator-1', { send: vi.fn() });
+    // Spectators never narrow the seat count.
+    expect(room.spectatorConnectionCount()).toBe(1);
+    expect(room.playerConnectionCount()).toBe(1);
+    expect(room.openSeatCount()).toBe(0);
   });
 });

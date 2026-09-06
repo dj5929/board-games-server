@@ -12,10 +12,11 @@ interface Props {
   roomId: string;
   localPlayerIds: string[];
   sessionToken: string;
+  spectatorId?: string;
   onLeave: () => void;
 }
 
-export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
+export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectatorId, onLeave }: Props) {
   const [state, setState] = useState<ScotlandYardState | null>(null);
   const [error, setError] = useState('');
   const [nodeInput, setNodeInput] = useState('');
@@ -24,12 +25,18 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave
   const [selectedTicket, setSelectedTicket] = useState<TransportType | 'auto'>('auto');
   const [gameOver, setGameOver] = useState<{ winner: PlayerRole; reason: string } | null>(null);
   const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
+  const [spectatorCount, setSpectatorCount] = useState(0);
   const [skipNotice, setSkipNotice] = useState('');
+  const isSpectator = !!spectatorId;
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     let isActive = true;
-    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`);
+    const ws = new WebSocket(
+      isSpectator
+        ? `${WS_URL}/rooms/${roomId}/ws?spectatorId=${spectatorId}&token=${sessionToken}`
+        : `${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`
+    );
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -37,6 +44,7 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave
       if (data.type === 'STATE_UPDATE') {
         if (isActive) {
           setTurnTimer(data.timer);
+          setSpectatorCount(data.spectatorCount ?? 0);
           setState(data.state);
         }
       } else if (data.type === 'ACTION_REJECTED') {
@@ -165,6 +173,16 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, onLeave
            <h2 className="text-xl font-bold">Turn {state.currentTurn}</h2>
            <TurnTimer timer={turnTimer} isMyTurn={!!isLocalActive} />
          </div>
+         {isSpectator && (
+           <div className="mb-3 text-xs bg-teal-900/50 text-teal-400 py-1 px-2 rounded font-semibold text-center border border-teal-800">
+             You are watching as a spectator
+           </div>
+         )}
+         {spectatorCount > 0 && (
+           <div className="mb-3 text-xs text-teal-300 bg-teal-900/30 py-1 px-2 rounded font-semibold text-center border border-teal-900">
+             {spectatorCount} {spectatorCount === 1 ? 'spectator' : 'spectators'} watching
+           </div>
+         )}
          {skipNotice && (
            <div className="mb-3 text-sm text-red-300 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
              {skipNotice}

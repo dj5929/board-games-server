@@ -11,11 +11,14 @@ const testHooks = vi.hoisted(() => {
 });
 
 vi.mock('../Lobby', () => ({
-  Lobby: (props: { onJoinRoom: (roomId: string, ids: string[], type: string, token: string) => void }) => (
+  Lobby: (props: { onJoinRoom: (roomId: string, ids: string[], type: string, token: string) => void; onSpectate: (roomId: string, type: string, spectatorId: string, token: string) => void }) => (
     <div>
       LOBBY
       <button onClick={() => props.onJoinRoom('room-1', ['p1'], testHooks.getGameType(), 'tok')}>
         JOIN
+      </button>
+      <button onClick={() => props.onSpectate('room-9', 'monopoly', 'spectator-1', 'speck')}>
+        SPECTATE
       </button>
     </div>
   ),
@@ -70,5 +73,13 @@ describe('App', () => {
     render(<App />);
     fireEvent.click(await screen.findByText('JOIN'));
     expect(await screen.findByText('GAME-SCOTLAND')).toBeInTheDocument();
+  });
+
+  it('routes a spectator watch into the game room with no local seats', async () => {
+    testHooks.setGameType('monopoly');
+    render(<App />);
+    fireEvent.click(await screen.findByText('SPECTATE'));
+    expect(await screen.findByText('GAME-MONOPOLY')).toBeInTheDocument();
+    expect(screen.queryByText('LOBBY')).not.toBeInTheDocument();
   });
 });

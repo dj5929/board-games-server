@@ -169,4 +169,26 @@ describe('GameRoom', () => {
     act(() => ws.onclose?.({}));
     expect(await screen.findByText('Connection closed')).toBeInTheDocument();
   });
+
+  it('shows a live spectator count from STATE_UPDATE and hides it at zero', async () => {
+    const ws = renderRoom();
+    act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));
+    await screen.findByText(/p1's Turn/);
+
+    act(() =>
+      ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState(), spectatorCount: 1 })
+    );
+    expect(await screen.findByText('1 spectator watching')).toBeInTheDocument();
+
+    act(() =>
+      ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState(), spectatorCount: 3 })
+    );
+    expect(await screen.findByText('3 spectators watching')).toBeInTheDocument();
+
+    // A server that predates spectatorCount omits the field -> treated as 0.
+    act(() => ws.simulateMessage({ type: 'STATE_UPDATE', state: initialState() }));
+    await waitFor(() =>
+      expect(screen.queryByText(/spectators? watching/)).not.toBeInTheDocument()
+    );
+  });
 });

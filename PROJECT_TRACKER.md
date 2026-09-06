@@ -376,5 +376,56 @@ Server-side AI "bots" that fill seats and play automatically, so players can sta
 
 ---
 
+## 🟢 Spectator / Observer Mode (Phase 36)
+
+Spectators watch any live room over a read-only WebSocket without taking a seat: full games, hot-seat games, and bot-filled rooms alike. They receive the engine's fully-hidden per-player projection and their inbound messages are never dispatched.
+
+### 🟢 Step 1 (COMPLETE): Room spectator infrastructure (`packages/server/src/Room.ts`)
+- 🟢 **Spectator tokens (in-memory):** `issueSpectatorToken()` returns a one-time `{ spectatorId: 'spectator-<uuid>', token }` pair plus `verifySpectatorToken`/`revokeSpectatorToken`. Like live connections, spectator credentials are deliberately **not** written to the Redis snapshot — they vanish on restart and are simply re-issued on demand.
+- 🟢 **Spectator connections:** `addSpectatorConnection`/`removeSpectatorConnection` keep a separate `spectatorConnections` map. Spectators never occupy a seat (`getAvailablePlayerId` is unchanged), never start the AFK turn timer, and never touch `lastActivity`.
+- 🟢 **Hidden-info projection:** every broadcast delivers the sentinel-id projection to spectators (`SPECTATOR_PLAYER_ID = '__spectator__'` — never matches a seat, so Monopoly decks, Catan dev cards, and Scotland Yard's Mr. X position all scrub) across both the local `broadcastState`/`broadcastEvents` and the cross-instance `broadcastRemoteState`/`broadcastRemoteEvents` paths.
+- 🟢 **Lifecycle:** the pub/sub subscription is now keyed to the combined player+spectator count (`connectionCount()`), so a spectator-only room still receives the remote stream; `closeAllConnections()` closes spectator sockets too; the turn timer stays keyed to players only.
+- 🟢 **Live spectator count:** every `STATE_UPDATE` now carries `spectatorCount` (via a shared `stateMessage()` builder used by all four broadcast paths), and `removeSpectatorConnection` rebroadcasts so the tally stays live for remaining players. Counts reflect the local instance only (in-memory, like the spectators themselves — the pub/sub message is left untouched).
+- 🟢 **Testing (TDD):** `Room.test.ts` grew 18 → 24 tests: token issue/verify; Mr. X sees his real node while a spectator in the same room gets position 0 (Scotland Yard projection); spectators never claim a seat; pub/sub stays subscribed while a spectator outlives the last player; `closeAllConnections` closes spectator connections; `spectatorCount` is `0` → `1` on join and back to `0` on leave.
+
+### 🟢 Step 2 (COMPLETE): Spectate endpoint + read-only WebSocket (`packages/server/src/server.ts`)
+- 🟢 **`POST /rooms/:roomId/spectate`:** returns `{ roomId, gameType, spectatorId, token }`; 404 for missing rooms. Spectators may watch at any time regardless of seat availability or room state.
+- 🟢 **WS spectator role:** `/rooms/:roomId/ws?spectatorId=...&token=...` verifies the spectator credential, registers the observer connection and its 30s ping/pong heartbeat, and installs **no message handler** — spectator frames are dropped unparsed, never validated or dispatched. The player path re-narrows its query union so spectators and players can't be confused.
+- 🟢 **Testing (TDD):** `server.test.ts` grew 21 → 27 tests: spectate 404; spectate issues a credential without consuming a seat (a subsequent `join` still gets `p2`); invalid spectator token → 1008; spectator receives the hidden Mr. X projection while the Mr. X player sees his real node; a spectator frame produces zero broadcasts/state change; spectators receive `STATE_UPDATE` + `EVENTS` when a player dispatches; spectator removal on socket close; the socket-level `spectatorCount` drops back to `0` once a spectator's socket closes.
+
+### 🟢 Step 3 (COMPLETE): Client spectator mode (`packages/web-client`)
+- 🟢 **`Lobby.tsx`:** new "watch as a spectator" section (room-id input → `POST /rooms/:id/spectate`) routing via a new `onSpectate(roomId, gameType, spectatorId, token)` callback.
+- 🟢 **`App.tsx`:** `GameConfig` gains an optional `spectatorId`; spectator entries hold no local seats (`localPlayerIds: []`) and pass the credential down to the active room component.
+- 🟢 **`GameRoom.tsx`:** WS URL uses `?spectatorId=...&token=...` (never a `playerId`); header shows "You are watching this game as a spectator"; the Restart button and the Game-Over "Play Again" action are hidden from spectators. All rooms render a live "N spectator(s) watching" line from `STATE_UPDATE.spectatorCount`.
+- 🟢 **`CatanRoom.tsx`:** same spectator WS + header; the per-player resource/VP panel hides (no local seat) while the board, phases, robber, and event feed stay visible.
+- 🟢 **`ScotlandYardRoom.tsx`:** same spectator WS + a "You are watching as a spectator" banner; ticket inventory/controls render nothing (no local seats → `isLocalActive` false), and any capture attempt is moot because the projected state hides Mr. X.
+- 🟢 **Testing (TDD):** `Lobby.test.tsx` grew 13 → 15 tests (spectate POST + alert on a missing room), `App.test.tsx` gained a spectator routing test, and `GameRoom.test.tsx` grew 5 → 6 (badge shows for `1`/`3` spectators and hides at `0`); all three room components accept an optional `spectatorId` prop without breaking existing renders.
+
+### 🟢 Verification (Phase 36)
+- Full suite green (**34 files / 388 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean (pre-existing dep-array warnings only), `@packages/server` + `web-client` production builds pass.
+
+---
+
+## 🟢 Public Room Browser (Phase 37)
+
+A live directory of public rooms in the Lobby transforms the "join by id" hall into a matchmaking hub built on Phase 35's `RoomManager.allRooms()` and Phase 36's spectator flow: browse open/playing games, join a free seat, or watch as a spectator — all without knowing the room id.
+
+### 🟢 Step 1 (COMPLETE): Public-room flag + directory (`packages/server/src`)
+- 🟢 **`isPublic` room flag:** `IRoomOptions.isPublic` (default `false` — privacy-safe) set at creation from `POST /rooms`, persisted in the Redis snapshot (`writeSnapshot`), restored on rehydration (`loadState` + `RoomManager.initFromRedis`) exactly like the hot-seat/owner flags.
+- 🟢 **`GET /rooms`:** returns `{ rooms: RoomDirectoryEntry[] }`. `RoomManager.listPublicRooms()` exports only public rooms with live metadata: `roomId`, `gameType`, `label`, `seats`, `capacity`, `connectedCount`, `availableSeats`, `status`, `isFull`, `isHotSeat`, `botCount`/`hasBots`, `spectatorCount`. Optional `?gameType=` filter.
+- 🟢 **Room occupancy helpers:** `openSeatCount()` (claimable seats = not bot-owned, not claimed by a connection/token), `playerConnectionCount()`, `spectatorConnectionCount()` — spectators never narrow the seat count.
+- 🟢 **Testing (TDD):** `Room.test.ts` grew 24 → 25 (helpers + public flag), `RoomManager.test.ts` grew 9 → 11 (public-flag rehydration; `listPublicRooms` filtering + live occupancy), `server.test.ts` grew 27 → 32 (isPublic round-trip; directory metadata; available seats shrink as joiners claim; bots/hot-seat/spectators reflected; `?gameType` filter; private rooms excluded).
+
+### 🟢 Step 2 (COMPLETE): Lobby browser UI (`packages/web-client/src/components/Lobby.tsx`)
+- 🟢 **Live list:** the Lobby polls `GET /rooms` every 5 s (useEffect + `setInterval`, cleaned up on unmount, silent on server errors). Each entry shows the game badge (color + initial), status pill (Open/Playing/Ended), Hot Seat and N-Bot chips, `roomId · connected/seats taken · open seats` and a live "N watching" tally.
+- 🟢 **Actions:** per-room **Join** (reuses the join flow, disabled/labeled "Full" when `availableSeats === 0`) and **Watch** (reuses the Phase 36 spectate flow). Manual join/spectate inputs now share the same `requestJoin`/`requestSpectate` handlers.
+- 🟢 **Visibility toggle:** "List this room in the public browser" checkbox (default on) sends `isPublic` in the `POST /rooms` body; the Lobby container widens to `max-w-xl` for the directory.
+- 🟢 **Testing (TDD):** `Lobby.test.tsx` grew 15 → 19: renders the browser from `GET /rooms` (two rooms with status/bot/hot-seat/watching indicators), joins a listed room, watches a listed room (spectator flow, `onJoinRoom` untouched), and creates a private room when the toggle is unchecked. Existing create-body assertions updated to carry `isPublic: true`.
+
+### 🟢 Verification (Phase 37)
+- Full suite green (**34 files / 400 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean (pre-existing dep-array warnings only), `@packages/server` + `web-client` production builds pass.
+
+---
+
 ## 🔮 Future Additions (Post-MVP)
 

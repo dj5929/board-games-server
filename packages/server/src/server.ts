@@ -50,7 +50,7 @@ export const buildApp = (logger: boolean = true) => {
   fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
   fastify.register(fastifyWebsocket);
 
-  fastify.post<{ Body: { playerCount?: number; gameType?: string; hotSeat?: boolean; bots?: string[] } }>('/rooms', async (request, reply) => {
+  fastify.post<{ Body: { playerCount?: number; gameType?: string; hotSeat?: boolean; bots?: string[]; isPublic?: boolean } }>('/rooms', async (request, reply) => {
     const body = request.body || {};
     const gameType = body.gameType || 'monopoly';
 
@@ -83,9 +83,10 @@ export const buildApp = (logger: boolean = true) => {
     // Hot-seat rooms are driven by a single shared browser, so the creator's
     // session may act for any seat (see the WS dispatch rule below).
     const isHotSeat = body.hotSeat === true;
+    const isPublic = body.isPublic === true;
     const room = new Room<IGameState, IPlayerAction, IGameEvent>(
       roomId, gameType, engine, CryptoRandomProvider, playerIds, undefined,
-      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null, turnTimeLimitMs: TURN_TIME_LIMIT_MS, botSeats }
+      { isHotSeat, ownerPlayerId: isHotSeat ? playerIds[0]! : null, turnTimeLimitMs: TURN_TIME_LIMIT_MS, botSeats, isPublic }
     );
     roomManager.createRoom(room);
 
@@ -93,7 +94,16 @@ export const buildApp = (logger: boolean = true) => {
     const playerId = playerIds[0]!;
     const sessionToken = room.issueSessionToken(playerId);
 
-    return { roomId, playerIds, gameType, isHotSeat, playerId, sessionToken };
+    return { roomId, playerIds, gameType, isHotSeat, isPublic, playerId, sessionToken };
+  });
+
+  fastify.get<{ Querystring: { gameType?: string } }>('/rooms', async (request) => {
+    const gameType = request.query.gameType;
+    let rooms = roomManager.listPublicRooms();
+    if (gameType && isGameType(gameType)) {
+      rooms = rooms.filter(r => r.gameType === gameType);
+    }
+    return { rooms };
   });
 
   fastify.post<{ Params: { roomId: string } }>('/rooms/:roomId/join', async (request, reply) => {
@@ -113,8 +123,22 @@ export const buildApp = (logger: boolean = true) => {
     return { playerId: availableId, gameType: room.gameType, sessionToken };
   });
 
+  fastify.post<{ Params: { roomId: string } }>('/rooms/:roomId/spectate', async (request, reply) => {
+    const roomId = request.params.roomId;
+    const room = roomManager.getRoom(roomId);
+
+    if (!room) {
+      return reply.status(404).send({ error: 'Room not found' });
+    }
+
+    // Spectators may watch any room at any time — full games, hot-seat games,
+    // bot-filled games — without ever occupying a seat.
+    const { spectatorId, token } = room.issueSpectatorToken();
+    return { roomId, gameType: room.gameType, spectatorId, token };
+  });
+
   fastify.register(async function (fastify) {
-    fastify.get<{ Params: { roomId: string }; Querystring: { playerId?: string, token?: string } }>('/rooms/:roomId/ws', { websocket: true }, (socket, req) => {
+    fastify.get<{ Params: { roomId: string }; Querystring: { playerId?: string, token?: string, spectatorId?: string } }>('/rooms/:roomId/ws', { websocket: true }, (socket, req) => {
       const roomId = req.params.roomId;
       const room = roomManager.getRoom(roomId);
 
@@ -125,9 +149,53 @@ export const buildApp = (logger: boolean = true) => {
 
       const playerId = req.query.playerId;
       const token = req.query.token;
+      const spectatorId = req.query.spectatorId;
 
+      if (!token || (!playerId && !spectatorId)) {
+        socket.close(1008, 'playerId/spectatorId and token required in query');
+        return;
+      }
+
+      // Spectator connections only observe the game: they receive the
+      // hidden-info projection and their inbound messages are never dispatched.
+      if (spectatorId) {
+        if (!room.verifySpectatorToken(spectatorId, token)) {
+          socket.close(1008, 'Invalid session token');
+          return;
+        }
+
+        room.addSpectatorConnection(spectatorId, {
+          send: (data: string) => socket.send(data),
+          close: () => socket.close()
+        });
+        fastify.log.info(`[WS] Spectator ${spectatorId} connected to room ${roomId}`);
+
+        let isAlive = true;
+        socket.on('pong', () => { isAlive = true; });
+        const pingInterval = setInterval(() => {
+          if (!isAlive) {
+            socket.terminate();
+            clearInterval(pingInterval);
+            return;
+          }
+          isAlive = false;
+          socket.ping();
+        }, 30000);
+
+        socket.on('close', (code, reason) => {
+          clearInterval(pingInterval);
+          fastify.log.info(`[WS] Spectator ${spectatorId} disconnected from room ${roomId}. Code: ${code}, Reason: ${reason}`);
+          room.removeSpectatorConnection(spectatorId);
+        });
+        socket.on('error', (err) => {
+          fastify.log.error(`[WS] Error for room ${roomId}: ${err.message}`);
+        });
+        return;
+      }
+
+      // Remaining path is the player flow; re-narrow the discriminated union.
       if (!playerId || !token) {
-        socket.close(1008, 'playerId and token required in query');
+        socket.close(1008, 'playerId/spectatorId and token required in query');
         return;
       }
 

@@ -8,6 +8,11 @@ export interface IClientConnection {
   close?(): void;
 }
 
+/** Sentinel player id passed to `getStateForPlayer` for spectators. It never
+ *  matches a real seat, so every engine produces its fully-hidden projection
+ *  (Monopoly decks, Catan dev cards, Scotland Yard Mr. X position). */
+export const SPECTATOR_PLAYER_ID = '__spectator__';
+
 export interface IRoomOptions {
   /** Hot-seat rooms are played from a single shared browser. The room's owner
    *  session is then allowed to dispatch actions for *any* seat, because all
@@ -23,11 +28,20 @@ export interface IRoomOptions {
    *  human connection. Bot seats are never handed out to joining clients and
    *  never hold session tokens or WebSocket connections. */
   botSeats?: ReadonlyArray<string>;
+  /** Rooms opted into the public browser directory (`GET /rooms`) so players
+   *  can discover and join them from the Lobby without the room id. */
+  isPublic?: boolean;
 }
 
 export class Room<S extends IGameState, A extends IPlayerAction, E extends IGameEvent> {
   private state: S;
   private connections: Map<string, IClientConnection> = new Map();
+  /** Spectators observe the game through the hidden-info projection. They never
+   *  hold a seat, never receive a session token and can never dispatch actions.
+   *  Spectator tokens are in-memory only: like connections, they evaporate on a
+   *  server restart and are not part of the persisted Redis snapshot. */
+  private spectatorConnections: Map<string, IClientConnection> = new Map();
+  private spectatorTokens: Map<string, string> = new Map();
   private pubsub: PubSubManager | null = null;
   private turnTimer: ReturnType<typeof setInterval> | null = null;
   // Dirty-flag persistence: back-to-back saveState() calls (constructor write +
@@ -45,6 +59,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   public readonly isHotSeat: boolean;
   public readonly ownerPlayerId: string | null;
   public readonly botSeats: ReadonlySet<string>;
+  public readonly isPublic: boolean;
 
   constructor(
     public readonly id: string,
@@ -62,6 +77,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     this.isHotSeat = options.isHotSeat ?? false;
     this.ownerPlayerId = options.ownerPlayerId ?? null;
     this.botSeats = new Set(options.botSeats ?? []);
+    this.isPublic = options.isPublic ?? false;
     this.isRehydrated = !!initialState;
     // Skip the redundant persistence write on the rehydrate path: loadState()
     // has just read this exact snapshot from the store, so writing it straight
@@ -93,7 +109,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
    */
   public setPubSub(pubsub: PubSubManager): void {
     this.pubsub = pubsub;
-    if (this.connections.size > 0 && this.pubsub) {
+    if (this.connectionCount() > 0 && this.pubsub) {
       this.pubsub.subscribe(this.id, msg => this.deliverRemoteMessage(msg));
     }
   }
@@ -133,6 +149,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       isHotSeat: this.isHotSeat,
       ownerPlayerId: this.ownerPlayerId,
       botSeats: Array.from(this.botSeats),
+      isPublic: this.isPublic,
       turnStartedAt: this.turnStartedAt,
       turnTimeLimitMs: this.turnTimeLimitMs,
       sessionTokens: Array.from(this.sessionTokens.entries()),
@@ -157,6 +174,7 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     (this as { isHotSeat: boolean }).isHotSeat = data.isHotSeat === true;
     (this as { ownerPlayerId: string | null }).ownerPlayerId = data.ownerPlayerId ?? null;
     (this as { botSeats: ReadonlySet<string> }).botSeats = new Set(data.botSeats ?? []);
+    (this as { isPublic: boolean }).isPublic = data.isPublic === true;
   }
 
   public getState(): S {
@@ -168,12 +186,13 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     if (existing && existing !== connection && typeof (existing as { close?: () => void }).close === 'function') {
       (existing as { close: () => void }).close();
     }
-    const wasEmpty = this.connections.size === 0;
+    const noPlayers = this.connections.size === 0;
+    const noClients = this.connectionCount() === 0;
     this.connections.set(playerId, connection);
-    if (wasEmpty && this.pubsub) {
+    if (noClients && this.pubsub) {
       this.pubsub.subscribe(this.id, msg => this.deliverRemoteMessage(msg));
     }
-    if (wasEmpty) {
+    if (noPlayers) {
       this.startTurnTimer();
     }
     this.disconnectedAt.delete(playerId);
@@ -185,13 +204,43 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
   public removeConnection(playerId: string) {
     this.connections.delete(playerId);
     if (this.connections.size === 0) {
-      if (this.pubsub) {
-        this.pubsub.unsubscribe(this.id);
-      }
       this.stopTurnTimer();
+    }
+    if (this.connectionCount() === 0 && this.pubsub) {
+      this.pubsub.unsubscribe(this.id);
     }
     this.disconnectedAt.set(playerId, Date.now());
     this.saveState();
+  }
+
+  /** Number of live WebSocket connections (players + spectators) to this room. */
+  private connectionCount(): number {
+    return this.connections.size + this.spectatorConnections.size;
+  }
+
+  public addSpectatorConnection(spectatorId: string, connection: IClientConnection) {
+    const existing = this.spectatorConnections.get(spectatorId);
+    if (existing && existing !== connection && typeof (existing as { close?: () => void }).close === 'function') {
+      (existing as { close: () => void }).close();
+    }
+    const noClients = this.connectionCount() === 0;
+    this.spectatorConnections.set(spectatorId, connection);
+    if (noClients && this.pubsub) {
+      this.pubsub.subscribe(this.id, msg => this.deliverRemoteMessage(msg));
+    }
+    // Spectators are not persisted and do not extend the room's activity TTL
+    // (lastActivity) — they merely observe the broadcast stream.
+    this.broadcastState();
+  }
+
+  public removeSpectatorConnection(spectatorId: string) {
+    this.spectatorConnections.delete(spectatorId);
+    if (this.connectionCount() === 0 && this.pubsub) {
+      this.pubsub.unsubscribe(this.id);
+    } else if (this.connectionCount() > 0) {
+      // Notify the remaining players/spectators that the live count changed.
+      this.broadcastState();
+    }
   }
 
   public closeAllConnections() {
@@ -201,6 +250,12 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       }
     }
     this.connections.clear();
+    for (const conn of this.spectatorConnections.values()) {
+      if (typeof conn.close === 'function') {
+        conn.close();
+      }
+    }
+    this.spectatorConnections.clear();
     this.stopTurnTimer();
     if (this.pubsub) {
       this.pubsub.unsubscribe(this.id);
@@ -320,6 +375,9 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     for (const conn of this.connections.values()) {
       conn.send(payload);
     }
+    for (const conn of this.spectatorConnections.values()) {
+      conn.send(payload);
+    }
   }
 
   private sendRejected(playerId: string, error: string) {
@@ -332,20 +390,42 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     }
   }
 
+  /** Serialize a STATE_UPDATE message for one recipient. `stateForConn` is the
+   *  per-player projection (or the raw state when an engine has no hidden info),
+   *  and `spectatorCount` reports the live observer tally on this instance. */
+  private stateMessage(stateForConn: S, timer: unknown): string {
+    return JSON.stringify({
+      type: 'STATE_UPDATE',
+      state: stateForConn,
+      timer,
+      spectatorCount: this.spectatorConnections.size,
+    });
+  }
+
   private broadcastState() {
     const hasProjection = typeof this.engine.getStateForPlayer === 'function';
     const timer = this.timerMeta();
     if (!hasProjection) {
       // No hidden info: the full state is identical for every player, so
       // serialize ONCE and reuse the same payload string for all connections.
-      const payload = JSON.stringify({ type: 'STATE_UPDATE', state: this.state, timer });
+      const payload = this.stateMessage(this.state, timer);
       for (const conn of this.connections.values()) {
+        conn.send(payload);
+      }
+      for (const conn of this.spectatorConnections.values()) {
         conn.send(payload);
       }
     } else {
       for (const [pid, conn] of this.connections.entries()) {
         const stateForPlayer = this.engine.getStateForPlayer!(this.state, playerId(pid));
-        conn.send(JSON.stringify({ type: 'STATE_UPDATE', state: stateForPlayer, timer }));
+        conn.send(this.stateMessage(stateForPlayer, timer));
+      }
+      // Spectators always receive the fully-hidden projection (a sentinel id
+      // that can never match a real seat).
+      const spectatorState = this.engine.getStateForPlayer!(this.state, playerId(SPECTATOR_PLAYER_ID));
+      const payload = this.stateMessage(spectatorState, timer);
+      for (const conn of this.spectatorConnections.values()) {
+        conn.send(payload);
       }
     }
     if (this.pubsub) {
@@ -357,16 +437,22 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     const hasProjection = typeof this.engine.getStateForPlayer === 'function';
     const t = timer ?? this.timerMeta();
     if (!hasProjection) {
-      const payload = JSON.stringify({ type: 'STATE_UPDATE', state: this.state, timer: t });
+      const payload = this.stateMessage(this.state, t);
       for (const conn of this.connections.values()) {
+        conn.send(payload);
+      }
+      for (const conn of this.spectatorConnections.values()) {
         conn.send(payload);
       }
     } else {
       for (const [pid, conn] of this.connections.entries()) {
-        const stateForPlayer = hasProjection
-          ? this.engine.getStateForPlayer!(this.state, playerId(pid))
-          : this.state;
-        conn.send(JSON.stringify({ type: 'STATE_UPDATE', state: stateForPlayer, timer: t }));
+        const stateForPlayer = this.engine.getStateForPlayer!(this.state, playerId(pid));
+        conn.send(this.stateMessage(stateForPlayer, t));
+      }
+      const spectatorState = this.engine.getStateForPlayer!(this.state, playerId(SPECTATOR_PLAYER_ID));
+      const payload = this.stateMessage(spectatorState, t);
+      for (const conn of this.spectatorConnections.values()) {
+        conn.send(payload);
       }
     }
   }
@@ -383,6 +469,9 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
     for (const conn of this.connections.values()) {
       conn.send(payload);
     }
+    for (const conn of this.spectatorConnections.values()) {
+      conn.send(payload);
+    }
     if (this.pubsub) {
       this.pubsub.publish(this.id, { state: this.state, events, timer: this.timerMeta() });
     }
@@ -396,6 +485,27 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
       if (!this.connections.has(id) && !this.sessionTokens.has(id)) return id;
     }
     return null;
+  }
+
+  /** How many human seats are still claimable (not bot-owned, not yet claimed
+   *  by a connection or a session token). Drives the room browser's "Join" state. */
+  public openSeatCount(): number {
+    let count = 0;
+    for (const p of this.state.players) {
+      if (this.botSeats.has(p.id)) continue;
+      if (!this.connections.has(p.id) && !this.sessionTokens.has(p.id)) count++;
+    }
+    return count;
+  }
+
+  /** Live number of seated player connections (spectators excluded). */
+  public playerConnectionCount(): number {
+    return this.connections.size;
+  }
+
+  /** Live number of connected spectators. */
+  public spectatorConnectionCount(): number {
+    return this.spectatorConnections.size;
   }
 
   public issueSessionToken(playerId: string): string {
@@ -414,5 +524,22 @@ export class Room<S extends IGameState, A extends IPlayerAction, E extends IGame
 
   public verifySessionToken(playerId: string, token: string): boolean {
     return this.sessionTokens.get(playerId) === token;
+  }
+
+  /** Issue a one-time spectator credential. The pair is intentionally in-memory
+   *  only — spectators vanish with the connections on a server restart. */
+  public issueSpectatorToken(): { spectatorId: string; token: string } {
+    const spectatorId = `spectator-${crypto.randomUUID()}`;
+    const token = crypto.randomUUID();
+    this.spectatorTokens.set(spectatorId, token);
+    return { spectatorId, token };
+  }
+
+  public revokeSpectatorToken(spectatorId: string) {
+    this.spectatorTokens.delete(spectatorId);
+  }
+
+  public verifySpectatorToken(spectatorId: string, token: string): boolean {
+    return this.spectatorTokens.get(spectatorId) === token;
   }
 }

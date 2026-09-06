@@ -6,7 +6,7 @@ Coverage is measured with **Vitest + `@vitest/coverage-v8`**. Regenerate the rep
 npm run test:cov
 ```
 
-Current baseline: **259 tests / 26 test files passing** (`npm test`). Lint (`npm run lint` + web-client lint) and typecheck (`tsc --noEmit -p tsconfig.json`) are clean.
+Current baseline: **400 tests / 34 test files passing** (`npm test`). Lint (`npm run lint` + web-client lint) and typecheck (`tsc --noEmit -p tsconfig.json`) are clean.
 
 ## Component Summary
 
@@ -55,7 +55,7 @@ Notable coverage: hidden-movement per-player projection (Mr. X scrub, reveal-tur
 
 ## server
 
-Unit + integration coverage of the full HTTP and WebSocket surface. `server.test.ts` drives `buildApp()` through real HTTP injection (`fastify.inject`) and a live WebSocket round-trip over a real `ws` client, plus error paths (400/404, close codes `1008`, `ERROR` reply, no-broadcast on invalid actions, connection cleanup).
+Unit + integration coverage of the full HTTP and WebSocket surface. `server.test.ts` drives `buildApp()` through real HTTP injection (`fastify.inject`) and a live WebSocket round-trip over a real `ws` client, plus error paths (400/404, close codes `1008`, `ERROR` reply, no-broadcast on invalid actions, connection cleanup). Phase 36 adds the spectator surface: `POST /rooms/:roomId/spectate` (credential issue, 404), the read-only WS spectator role (hidden Mr. X projection, dropped spectator frames, spectator delivery of player broadcasts, close-cleanup, live `spectatorCount` in `STATE_UPDATE`), and `Room` spectator token/connection/lifecycle tests. Phase 37 adds the public directory: `isPublic` create-flag round-trip and `GET /rooms` (metadata shape, private-room exclusion, `availableSeats` shrinking as seats are claimed, hot-seat/bot/spectator reflection, `?gameType` filter), plus `RoomManager.listPublicRooms` alternating with `Room.openSeatCount`/connection-count helpers.
 
 | File | Stmts | Branch | Funcs | Lines |
 |---|--:|--:|--:|--:|
@@ -65,7 +65,7 @@ Unit + integration coverage of the full HTTP and WebSocket surface. `server.test
 
 ## web-client
 
-React hooks/utilities are heavily covered; `App`, `Lobby`, and `GameRoom` cover the production flows with a stubbed `WebSocket`. `Lobby.tsx` coverage is high (93.75% stmts) after adding Online-mode and join-room tests. Heavier board components are left to the automated UI testing workflow (`.agents/skills/ui-testing`).
+React hooks/utilities are heavily covered; `App`, `Lobby`, and `GameRoom` cover the production flows with a stubbed `WebSocket`. `Lobby.tsx` coverage is high (93.75% stmts) after adding Online-mode and join-room tests. Phase 36 adds the spectator flow: `Lobby` spectate section (POST `/rooms/:id/spectate`, missing-room alert) and `App` spectator routing with an empty local-seat list and a `spectatorId`. Heavier board components are left to the automated UI testing workflow (`.agents/skills/ui-testing`).
 
 | File | Stmts | Branch | Funcs | Lines |
 |---|--:|--:|--:|--:|

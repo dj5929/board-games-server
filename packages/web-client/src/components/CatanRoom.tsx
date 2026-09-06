@@ -19,6 +19,7 @@ interface Props {
   roomId: string;
   localPlayerIds: string[];
   sessionToken: string;
+  spectatorId?: string;
   onLeave: () => void;
 }
 
@@ -28,7 +29,7 @@ interface EventLogEntry {
   msg: string;
 }
 
-export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
+export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, onLeave }: Props) {
   const [state, setState] = useState<ICatanState | null>(null);
   const [error, setError] = useState('');
   const { toasts, addToast } = useToasts();
@@ -45,6 +46,8 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
   const [isPlayingRoadBuilding, setIsPlayingRoadBuilding] = useState(false);
   const [roadBuildingEdges, setRoadBuildingEdges] = useState<string[]>([]);
   const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
+  const [spectatorCount, setSpectatorCount] = useState(0);
+  const isSpectator = !!spectatorId;
   const wsRef = useRef<WebSocket | null>(null);
 
   // Event log is stored oldest-first; reverse once per log change for display.
@@ -70,13 +73,18 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
 
   useEffect(() => {
     let isActive = true;
-    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`);
+    const ws = new WebSocket(
+      isSpectator
+        ? `${WS_URL}/rooms/${roomId}/ws?spectatorId=${spectatorId}&token=${sessionToken}`
+        : `${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`
+    );
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'STATE_UPDATE') {
         setTurnTimer(data.timer);
+        setSpectatorCount(data.spectatorCount ?? 0);
         setState(data.state);
         setBuildMode(null); // Reset build mode on state update
       } else if (data.type === 'EVENTS') {
@@ -368,7 +376,14 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
       <div className="flex justify-between items-center bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-lg">
         <div>
           <h2 className="text-xl font-bold">Catan Room: <span className="text-orange-400 font-mono">{roomId}</span></h2>
-          <p className="text-gray-400 text-sm">You are playing as <span className="text-orange-400 font-mono">{localPlayerIds.join(', ')}</span></p>
+          {isSpectator ? (
+            <p className="text-gray-400 text-sm">You are watching this game as a <span className="text-teal-400 font-mono">spectator</span></p>
+          ) : (
+            <p className="text-gray-400 text-sm">You are playing as <span className="text-orange-400 font-mono">{localPlayerIds.join(', ')}</span></p>
+          )}
+          {spectatorCount > 0 && (
+            <p className="text-teal-400 text-xs mt-0.5">{spectatorCount} {spectatorCount === 1 ? 'spectator' : 'spectators'} watching</p>
+          )}
         </div>
         <div className="flex gap-4 items-center">
           <TurnTimer timer={turnTimer} isMyTurn={isMyTurn} />
@@ -423,14 +438,16 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Pro
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 bg-gray-900 p-4 rounded-xl border border-gray-800">
-             <div className="flex justify-between"><span className="text-gray-400">Wood:</span><span className="font-bold">{me?.resources.WOOD}</span></div>
-             <div className="flex justify-between"><span className="text-gray-400">Brick:</span><span className="font-bold">{me?.resources.BRICK}</span></div>
-             <div className="flex justify-between"><span className="text-gray-400">Sheep:</span><span className="font-bold">{me?.resources.SHEEP}</span></div>
-             <div className="flex justify-between"><span className="text-gray-400">Wheat:</span><span className="font-bold">{me?.resources.WHEAT}</span></div>
-             <div className="flex justify-between"><span className="text-gray-400">Ore:</span><span className="font-bold">{me?.resources.ORE}</span></div>
-             <div className="flex justify-between text-yellow-400"><span className="text-yellow-600">VP:</span><span className="font-bold">{me?.victoryPoints}</span></div>
-          </div>
+          {me && (
+            <div className="grid grid-cols-2 gap-3 bg-gray-900 p-4 rounded-xl border border-gray-800">
+               <div className="flex justify-between"><span className="text-gray-400">Wood:</span><span className="font-bold">{me.resources.WOOD}</span></div>
+               <div className="flex justify-between"><span className="text-gray-400">Brick:</span><span className="font-bold">{me.resources.BRICK}</span></div>
+               <div className="flex justify-between"><span className="text-gray-400">Sheep:</span><span className="font-bold">{me.resources.SHEEP}</span></div>
+               <div className="flex justify-between"><span className="text-gray-400">Wheat:</span><span className="font-bold">{me.resources.WHEAT}</span></div>
+               <div className="flex justify-between"><span className="text-gray-400">Ore:</span><span className="font-bold">{me.resources.ORE}</span></div>
+               <div className="flex justify-between text-yellow-400"><span className="text-yellow-600">VP:</span><span className="font-bold">{me.victoryPoints}</span></div>
+            </div>
+          )}
 
           {(state.longestRoadOwner === me?.id || state.largestArmyOwner === me?.id) && (
             <div className="flex flex-col gap-2 -mt-3 mb-1">

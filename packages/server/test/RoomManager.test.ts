@@ -162,4 +162,43 @@ describe('RoomManager', () => {
     expect(restored?.isBot('p1')).toBe(false);
     manager.stopCleanup();
   });
+
+  it('rehydrates the public-room flag alongside the game state (Phase 37)', async () => {
+    new Room('pubroom', 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2'], undefined, {
+      isPublic: true
+    });
+
+    const manager = new RoomManager();
+    await manager.initFromRedis({ monopoly: MonopolyEngine } as any);
+
+    const restored = manager.getRoom('pubroom');
+    expect(restored?.isPublic).toBe(true);
+    manager.stopCleanup();
+  });
+
+  it('lists only public rooms in the directory with live occupancy (Phase 37)', () => {
+    const manager = new RoomManager();
+    manager.createRoom(makeRoom('priv'));
+    manager.createRoom(
+      new Room('pub', 'monopoly', MonopolyEngine as any, { next: () => 0.5 }, ['p1', 'p2', 'p3'], undefined, {
+        isPublic: true,
+        botSeats: ['p3']
+      })
+    );
+    const pub = manager.getRoom('pub') as any;
+    pub.addConnection('p1', { send: vi.fn() });
+
+    const entries = manager.listPublicRooms();
+    expect(entries).toHaveLength(1);
+    const entry = entries[0]!;
+    expect(entry.roomId).toBe('pub');
+    expect(entry.seats).toBe(3);
+    expect(entry.capacity).toBe(8); // Monopoly max
+    expect(entry.connectedCount).toBe(1);
+    expect(entry.botCount).toBe(1);
+    // p1 claimed by connection, p3 is a bot -> only p2 remains open.
+    expect(entry.availableSeats).toBe(1);
+    expect(entry.isFull).toBe(false);
+    manager.stopCleanup();
+  });
 });

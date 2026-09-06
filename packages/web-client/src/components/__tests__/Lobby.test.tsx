@@ -7,10 +7,12 @@ const API_URL = 'http://localhost:3000';
 
 describe('Lobby', () => {
   let onJoinRoom: ReturnType<typeof vi.fn<(roomId: string, localPlayerIds: string[], gameType: GameType, sessionToken: string) => void>>;
+  let onSpectate: ReturnType<typeof vi.fn<(roomId: string, gameType: GameType, spectatorId: string, token: string) => void>>;
   let alertSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     onJoinRoom = vi.fn<(roomId: string, localPlayerIds: string[], gameType: GameType, sessionToken: string) => void>();
+    onSpectate = vi.fn<(roomId: string, gameType: GameType, spectatorId: string, token: string) => void>();
     alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
   });
 
@@ -30,7 +32,7 @@ describe('Lobby', () => {
       gameType: 'monopoly',
       sessionToken: 'tok-1',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.click(screen.getByText('Create New Game'));
 
@@ -39,7 +41,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 2, gameType: 'monopoly', hotSeat: true, bots: [] }),
+      body: JSON.stringify({ playerCount: 2, gameType: 'monopoly', hotSeat: true, bots: [], isPublic: true }),
     });
   });
 
@@ -50,7 +52,7 @@ describe('Lobby', () => {
       gameType: 'catan',
       sessionToken: 'tok-2',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.click(screen.getByText('Catan'));
     fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
@@ -61,7 +63,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 4, gameType: 'catan', hotSeat: true, bots: [] }),
+      body: JSON.stringify({ playerCount: 4, gameType: 'catan', hotSeat: true, bots: [], isPublic: true }),
     });
   });
 
@@ -71,7 +73,7 @@ describe('Lobby', () => {
       'fetch',
       vi.fn().mockReturnValue(new Promise(r => { resolveFetch = r; }))
     );
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     const createButton = screen.getByText('Create New Game');
     fireEvent.click(createButton);
@@ -89,7 +91,7 @@ describe('Lobby', () => {
   it('alerts the user and resets when the server request fails', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.click(screen.getByText('Create New Game'));
 
@@ -103,7 +105,7 @@ describe('Lobby', () => {
 
   it('renders the game mode, game type and player count controls', () => {
     mockFetchResponse({});
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     expect(screen.getByText('Welcome to the Lobby')).toBeInTheDocument();
     expect(screen.getByText('Hot Seat (Local)')).toBeInTheDocument();
@@ -116,7 +118,7 @@ describe('Lobby', () => {
 
   it('shows the correct player count range and re-clamps per selected game', () => {
     mockFetchResponse({});
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     const combo = () => screen.getByLabelText('Number of players') as HTMLSelectElement;
 
@@ -144,7 +146,7 @@ describe('Lobby', () => {
       gameType: 'catan',
       sessionToken: 'tok-online',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.click(screen.getByText('Online'));
     fireEvent.click(screen.getByText('Create New Game'));
@@ -158,7 +160,7 @@ describe('Lobby', () => {
       gameType: 'monopoly',
       sessionToken: 'tok-join',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.change(screen.getByPlaceholderText('Room ID'), { target: { value: 'abc123' } });
     fireEvent.click(screen.getByText('Join'));
@@ -173,7 +175,7 @@ describe('Lobby', () => {
       'fetch',
       vi.fn().mockResolvedValue({ status: 404, json: async () => ({}) })
     );
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.change(screen.getByPlaceholderText('Room ID'), { target: { value: 'nope' } });
     fireEvent.click(screen.getByText('Join'));
@@ -190,7 +192,7 @@ describe('Lobby', () => {
       gameType: 'monopoly',
       sessionToken: 'tok-bot',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '3' } });
     fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '1' } });
@@ -201,7 +203,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 3, gameType: 'monopoly', hotSeat: true, bots: ['p3'] }),
+      body: JSON.stringify({ playerCount: 3, gameType: 'monopoly', hotSeat: true, bots: ['p3'], isPublic: true }),
     });
   });
 
@@ -212,7 +214,7 @@ describe('Lobby', () => {
       gameType: 'monopoly',
       sessionToken: 'tok-abot',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
     fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '3' } });
@@ -223,7 +225,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 4, gameType: 'monopoly', hotSeat: true, bots: ['p2', 'p3', 'p4'] }),
+      body: JSON.stringify({ playerCount: 4, gameType: 'monopoly', hotSeat: true, bots: ['p2', 'p3', 'p4'], isPublic: true }),
     });
   });
 
@@ -234,7 +236,7 @@ describe('Lobby', () => {
       gameType: 'catan',
       sessionToken: 'tok-online-bot',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.click(screen.getByText('Online'));
     fireEvent.click(screen.getByText('Catan'));
@@ -248,7 +250,7 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 3, gameType: 'catan', hotSeat: false, bots: ['p2', 'p3'] }),
+      body: JSON.stringify({ playerCount: 3, gameType: 'catan', hotSeat: false, bots: ['p2', 'p3'], isPublic: true }),
     });
   });
 
@@ -259,7 +261,7 @@ describe('Lobby', () => {
       gameType: 'monopoly',
       sessionToken: 'tok-clamp',
     });
-    render(<Lobby onJoinRoom={onJoinRoom} />);
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
     fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '3' } });
@@ -274,7 +276,176 @@ describe('Lobby', () => {
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerCount: 3, gameType: 'monopoly', hotSeat: true, bots: ['p2', 'p3'] }),
+      body: JSON.stringify({ playerCount: 3, gameType: 'monopoly', hotSeat: true, bots: ['p2', 'p3'], isPublic: true }),
     });
+  });
+
+  it('watches a room as a spectator without a seat', async () => {
+    mockFetchResponse({
+      roomId: 'room-spec',
+      gameType: 'monopoly',
+      spectatorId: 'spectator-1',
+      token: 'tok-spec',
+    });
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Room ID to watch'), { target: { value: 'abc123' } });
+    fireEvent.click(screen.getByText('Spectate'));
+
+    await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-spec', 'monopoly', 'spectator-1', 'tok-spec'));
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/abc123/spectate`, { method: 'POST' });
+    expect(onJoinRoom).not.toHaveBeenCalled();
+  });
+
+  it('alerts when watching a missing room', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status: 404, json: async () => ({}) })
+    );
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Room ID to watch'), { target: { value: 'nope' } });
+    fireEvent.click(screen.getByText('Spectate'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Room not found'));
+    expect(onSpectate).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('creates a private room when the public toggle is unchecked (Phase 37)', async () => {
+    mockFetchResponse({
+      roomId: 'room-priv',
+      playerIds: ['p1', 'p2'],
+      gameType: 'monopoly',
+      sessionToken: 'tok-priv',
+    });
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    fireEvent.click(screen.getByLabelText('Public room'));
+    fireEvent.click(screen.getByText('Create New Game'));
+
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledTimes(1));
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerCount: 2, gameType: 'monopoly', hotSeat: true, bots: [], isPublic: false }),
+    });
+  });
+
+  it('renders the public room browser from GET /rooms (Phase 37)', async () => {
+    const rooms = [
+      {
+        roomId: 'room-a',
+        gameType: 'monopoly',
+        label: 'Monopoly',
+        seats: 2,
+        capacity: 8,
+        connectedCount: 1,
+        availableSeats: 1,
+        status: 'LOBBY',
+        isFull: false,
+        isHotSeat: false,
+        botCount: 0,
+        hasBots: false,
+        spectatorCount: 2,
+      },
+      {
+        roomId: 'room-b',
+        gameType: 'catan',
+        label: 'Catan',
+        seats: 4,
+        capacity: 4,
+        connectedCount: 4,
+        availableSeats: 0,
+        status: 'IN_PROGRESS',
+        isFull: true,
+        isHotSeat: true,
+        botCount: 1,
+        hasBots: true,
+        spectatorCount: 0,
+      },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string) => ({ json: async () => ({ rooms }) })));
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    await screen.findByText('room-a');
+    expect(
+      screen.getByText((content: string) => content.includes('1/2 seats taken') && content.includes('2 watching'))
+    ).toBeInTheDocument();
+    expect(screen.getByText('Hot Seat')).toBeInTheDocument();
+    expect(screen.getByText('1 Bot')).toBeInTheDocument();
+    expect(screen.getByText('Full')).toBeInTheDocument();
+    expect(screen.getByText('2 live')).toBeInTheDocument();
+  });
+
+  it('joins a room from the public browser (Phase 37)', async () => {
+    const rooms = [
+      {
+        roomId: 'room-a',
+        gameType: 'monopoly',
+        label: 'Monopoly',
+        seats: 2,
+        capacity: 8,
+        connectedCount: 1,
+        availableSeats: 1,
+        status: 'LOBBY',
+        isFull: false,
+        isHotSeat: false,
+        botCount: 0,
+        hasBots: false,
+        spectatorCount: 0,
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === `${API_URL}/rooms`) return { json: async () => ({ rooms }) };
+        return { json: async () => ({ playerId: 'p2', gameType: 'monopoly', sessionToken: 'tok-dir' }) };
+      })
+    );
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    const joinButton = (await screen.findByText('room-a')).closest('li')!.querySelector('button')!;
+    fireEvent.click(joinButton);
+
+    await waitFor(() => expect(onJoinRoom).toHaveBeenCalledWith('room-a', ['p2'], 'monopoly', 'tok-dir'));
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/room-a/join`, { method: 'POST' });
+  });
+
+  it('watches a room from the public browser (Phase 37)', async () => {
+    const rooms = [
+      {
+        roomId: 'room-a',
+        gameType: 'monopoly',
+        label: 'Monopoly',
+        seats: 2,
+        capacity: 8,
+        connectedCount: 2,
+        availableSeats: 0,
+        status: 'IN_PROGRESS',
+        isFull: true,
+        isHotSeat: false,
+        botCount: 0,
+        hasBots: false,
+        spectatorCount: 0,
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === `${API_URL}/rooms`) return { json: async () => ({ rooms }) };
+        return { json: async () => ({ roomId: 'room-a', gameType: 'monopoly', spectatorId: 'spectator-9', token: 's-tok' }) };
+      })
+    );
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    const listItem = (await screen.findByText('room-a')).closest('li')!;
+    const buttons = listItem.querySelectorAll('button');
+    fireEvent.click(buttons[1]! as HTMLButtonElement); // the Watch button
+
+    await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-a', 'monopoly', 'spectator-9', 's-tok'));
+    expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/room-a/spectate`, { method: 'POST' });
+    expect(onJoinRoom).not.toHaveBeenCalled();
   });
 });

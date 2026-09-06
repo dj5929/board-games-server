@@ -1,5 +1,5 @@
 import { Room } from './Room';
-import { IGameEngine, IGameState, IPlayerAction, IGameEvent } from '@packages/engine-core';
+import { GAME_CONFIGS, IGameEngine, IGameState, IPlayerAction, IGameEvent, type GameType } from '@packages/engine-core';
 import { RedisStore, redisReviver } from './RedisStore';
 import { PubSubManager } from './PubSubManager';
 
@@ -8,6 +8,23 @@ const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const MAX_ROOMS = 10000;
 
 type Logger = Pick<typeof console, 'log'>;
+
+/** A single row of the public room browser (`GET /rooms`). */
+export interface RoomDirectoryEntry {
+  roomId: string;
+  gameType: string;
+  label: string;
+  seats: number;
+  capacity: number;
+  connectedCount: number;
+  availableSeats: number;
+  status: IGameState['status'];
+  isFull: boolean;
+  isHotSeat: boolean;
+  botCount: number;
+  hasBots: boolean;
+  spectatorCount: number;
+}
 
 export class RoomManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,6 +65,36 @@ export class RoomManager {
   /** Iterate every live room. Used by the BotController sweep. */
   public *allRooms(): Iterable<Room<IGameState, IPlayerAction, IGameEvent>> {
     yield* this.rooms.values();
+  }
+
+  /** Snapshot of the public rooms for the Lobby browser (`GET /rooms`).
+   *  Private rooms are excluded entirely; spectators and empty lobby rooms
+   *  that have never been joined still appear so they can be watched. */
+  public listPublicRooms(): RoomDirectoryEntry[] {
+    const entries: RoomDirectoryEntry[] = [];
+    for (const room of this.rooms.values()) {
+      if (!room.isPublic) continue;
+      const state = room.getState();
+      const config = GAME_CONFIGS[room.gameType as GameType];
+      const botCount = room.botSeats.size;
+      const availableSeats = room.openSeatCount();
+      entries.push({
+        roomId: room.id,
+        gameType: room.gameType,
+        label: config?.label ?? room.gameType,
+        seats: state.players.length,
+        capacity: config?.maxPlayers ?? state.players.length,
+        connectedCount: room.playerConnectionCount(),
+        availableSeats,
+        status: state.status,
+        isFull: availableSeats === 0,
+        isHotSeat: room.isHotSeat,
+        botCount,
+        hasBots: botCount > 0,
+        spectatorCount: room.spectatorConnectionCount()
+      });
+    }
+    return entries;
   }
 
   public removeRoom(id: string) {
@@ -95,7 +142,8 @@ export class RoomManager {
           isHotSeat: data.isHotSeat === true,
           ownerPlayerId: data.ownerPlayerId ?? null,
           turnTimeLimitMs: data.turnTimeLimitMs ?? 0,
-          botSeats: data.botSeats ?? []
+          botSeats: data.botSeats ?? [],
+          isPublic: data.isPublic === true
         });
         room.loadState(data);
         room.setPubSub(this.pubsub);

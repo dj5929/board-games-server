@@ -18,6 +18,7 @@ interface Props {
   roomId: string;
   localPlayerIds: string[];
   sessionToken: string;
+  spectatorId?: string;
   onLeave: () => void;
 }
 
@@ -27,7 +28,7 @@ interface EventLogEntry {
   msg: string;
 }
 
-export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Props) {
+export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, onLeave }: Props) {
   const [state, setState] = useState<IMonopolyState | null>(null);
   const [error, setError] = useState('');
   const { toasts, addToast } = useToasts();
@@ -41,19 +42,26 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
   const [diceRoll, setDiceRoll] = useState<{dice1: number, dice2: number} | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [turnTimer, setTurnTimer] = useState<TurnTimerMeta | undefined>(undefined);
+  const [spectatorCount, setSpectatorCount] = useState(0);
+  const isSpectator = !!spectatorId;
   const wsRef = useRef<WebSocket | null>(null);
   const pendingStateRef = useRef<IMonopolyState | null>(null);
   const stateTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let isActive = true;
-    const ws = new WebSocket(`${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`);
+    const ws = new WebSocket(
+      isSpectator
+        ? `${WS_URL}/rooms/${roomId}/ws?spectatorId=${spectatorId}&token=${sessionToken}`
+        : `${WS_URL}/rooms/${roomId}/ws?playerId=${localPlayerIds[0]}&token=${sessionToken}`
+    );
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'STATE_UPDATE') {
         setTurnTimer(data.timer);
+        setSpectatorCount(data.spectatorCount ?? 0);
         pendingStateRef.current = data.state;
         if (stateTimerRef.current) clearTimeout(stateTimerRef.current);
         // Default commit delay to allow EVENTS to arrive and optionally extend the delay
@@ -292,7 +300,14 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
       <div className="flex justify-between items-center bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-lg">
         <div>
           <h2 className="text-xl font-bold">Room: <span className="text-blue-400 font-mono">{roomId}</span></h2>
-          <p className="text-gray-400 text-sm">You are playing as <span className="text-blue-400 font-mono">{localPlayerIds.join(', ')}</span></p>
+          {isSpectator ? (
+            <p className="text-gray-400 text-sm">You are watching this game as a <span className="text-teal-400 font-mono">spectator</span></p>
+          ) : (
+            <p className="text-gray-400 text-sm">You are playing as <span className="text-blue-400 font-mono">{localPlayerIds.join(', ')}</span></p>
+          )}
+          {spectatorCount > 0 && (
+            <p className="text-teal-400 text-xs mt-0.5">{spectatorCount} {spectatorCount === 1 ? 'spectator' : 'spectators'} watching</p>
+          )}
         </div>
         <div className="flex gap-2 md:gap-4 items-center">
           <TurnTimer timer={turnTimer} isMyTurn={isMyTurn} />
@@ -302,9 +317,11 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
           <button onClick={() => setShowEventLog(!showEventLog)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
             {showEventLog ? 'Hide Events' : 'Event Log'}
           </button>
-          <button onClick={() => setShowRestartConfirm(true)} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
-            Restart
-          </button>
+          {!isSpectator && (
+            <button onClick={() => setShowRestartConfirm(true)} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-bold shadow-md">
+              Restart
+            </button>
+          )}
           <button onClick={onLeave} className="text-gray-400 hover:text-white transition-colors underline text-sm ml-2">Leave</button>
         </div>
       </div>
@@ -369,12 +386,14 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, onLeave }: Prop
               >
                 Return to Home Screen
               </button>
-              <button 
-                onClick={handleRestartGame}
-                className="px-8 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-bold transition-colors w-full"
-              >
-                Play Again
-              </button>
+              {!isSpectator && (
+                <button 
+                  onClick={handleRestartGame}
+                  className="px-8 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-bold transition-colors w-full"
+                >
+                  Play Again
+                </button>
+              )}
             </div>
           </div>
         </div>

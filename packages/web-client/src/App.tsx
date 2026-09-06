@@ -11,6 +11,7 @@ interface GameConfig {
   localPlayerIds: string[];
   gameType: 'monopoly' | 'catan' | 'scotland-yard';
   sessionToken: string;
+  spectatorId?: string;
 }
 
 function LoadingFallback() {
@@ -24,19 +25,30 @@ function LoadingFallback() {
 function App() {
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
 
+  const roomProps = gameConfig ? {
+    roomId: gameConfig.roomId,
+    localPlayerIds: gameConfig.localPlayerIds,
+    sessionToken: gameConfig.sessionToken,
+    spectatorId: gameConfig.spectatorId,
+    onLeave: () => setGameConfig(null)
+  } : null;
+
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
       <AudioToggle />
       <main className="flex-1 flex flex-col items-center justify-center p-6">
         <Suspense fallback={<LoadingFallback />}>
-          {!gameConfig ? (
-            <Lobby onJoinRoom={(roomId, localPlayerIds, gameType, sessionToken) => setGameConfig({ roomId, localPlayerIds, gameType, sessionToken })} />
+          {!gameConfig || !roomProps ? (
+            <Lobby
+              onJoinRoom={(roomId, localPlayerIds, gameType, sessionToken) => setGameConfig({ roomId, localPlayerIds, gameType, sessionToken })}
+              onSpectate={(roomId, gameType, spectatorId, token) => setGameConfig({ roomId, localPlayerIds: [], gameType, sessionToken: token, spectatorId })}
+            />
           ) : (
-            gameConfig.gameType === 'monopoly' ? 
-              <GameRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} sessionToken={gameConfig.sessionToken} onLeave={() => setGameConfig(null)} /> :
+            gameConfig.gameType === 'monopoly' ?
+              <GameRoom {...roomProps} /> :
             gameConfig.gameType === 'catan' ?
-              <CatanRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} sessionToken={gameConfig.sessionToken} onLeave={() => setGameConfig(null)} /> :
-              <ScotlandYardRoom roomId={gameConfig.roomId} localPlayerIds={gameConfig.localPlayerIds} sessionToken={gameConfig.sessionToken} onLeave={() => setGameConfig(null)} />
+              <CatanRoom {...roomProps} /> :
+              <ScotlandYardRoom {...roomProps} />
           )}
         </Suspense>
       </main>
