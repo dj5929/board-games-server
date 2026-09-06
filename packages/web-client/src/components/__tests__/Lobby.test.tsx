@@ -54,7 +54,7 @@ describe('Lobby', () => {
     });
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
-    fireEvent.click(screen.getByText('Catan'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Catan' }));
     fireEvent.change(screen.getByLabelText('Number of players'), { target: { value: '4' } });
     fireEvent.click(screen.getByText('Create New Game'));
 
@@ -109,9 +109,9 @@ describe('Lobby', () => {
 
     expect(screen.getByText('Welcome to the Lobby')).toBeInTheDocument();
     expect(screen.getByText('Hot Seat (Local)')).toBeInTheDocument();
-    expect(screen.getByText('Monopoly')).toBeInTheDocument();
-    expect(screen.getByText('Catan')).toBeInTheDocument();
-    expect(screen.getByText('Scotland Yard')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select Monopoly' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select Catan' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select Scotland Yard' })).toBeInTheDocument();
     expect(screen.getByLabelText('Number of players')).toHaveValue('2');
     expect(screen.getByLabelText('Computer players')).toHaveValue('0');
   });
@@ -125,16 +125,16 @@ describe('Lobby', () => {
     expect(Array.from(combo().options).map(o => o.value)).toEqual(['2', '3', '4', '5', '6', '7', '8']);
     expect(combo()).toHaveValue('2');
 
-    fireEvent.click(screen.getByText('Catan'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Catan' }));
     expect(Array.from(combo().options).map(o => o.value)).toEqual(['3', '4']);
     expect(combo()).toHaveValue('3');
 
     fireEvent.change(combo(), { target: { value: '4' } });
-    fireEvent.click(screen.getByText('Monopoly'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Monopoly' }));
     expect(Array.from(combo().options).map(o => o.value)).toEqual(['2', '3', '4', '5', '6', '7', '8']);
     expect(combo()).toHaveValue('4');
 
-    fireEvent.click(screen.getByText('Scotland Yard'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Scotland Yard' }));
     expect(Array.from(combo().options).map(o => o.value)).toEqual(['3', '4', '5', '6']);
     expect(combo()).toHaveValue('4');
   });
@@ -239,7 +239,7 @@ describe('Lobby', () => {
     render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
 
     fireEvent.click(screen.getByText('Online'));
-    fireEvent.click(screen.getByText('Catan'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Catan' }));
     fireEvent.change(screen.getByLabelText('Computer players'), { target: { value: '2' } });
     fireEvent.click(screen.getByText('Create New Game'));
 
@@ -447,5 +447,83 @@ describe('Lobby', () => {
     await waitFor(() => expect(onSpectate).toHaveBeenCalledWith('room-a', 'monopoly', 'spectator-9', 's-tok'));
     expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms/room-a/spectate`, { method: 'POST' });
     expect(onJoinRoom).not.toHaveBeenCalled();
+  });
+
+  it('filters the public browser by game type via GET /rooms?gameType= (Phase 37)', async () => {
+    const allRooms = [
+      {
+        roomId: 'room-a',
+        gameType: 'monopoly',
+        label: 'Monopoly',
+        seats: 2,
+        capacity: 8,
+        connectedCount: 1,
+        availableSeats: 1,
+        status: 'LOBBY',
+        isFull: false,
+        isHotSeat: false,
+        botCount: 0,
+        hasBots: false,
+        spectatorCount: 0,
+      },
+      {
+        roomId: 'room-b',
+        gameType: 'catan',
+        label: 'Catan',
+        seats: 4,
+        capacity: 4,
+        connectedCount: 1,
+        availableSeats: 3,
+        status: 'LOBBY',
+        isFull: false,
+        isHotSeat: false,
+        botCount: 0,
+        hasBots: false,
+        spectatorCount: 0,
+      },
+    ];
+    const catanOnly = [allRooms[1]!];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === `${API_URL}/rooms?gameType=catan`) return { json: async () => ({ rooms: catanOnly }) };
+        return { json: async () => ({ rooms: allRooms }) };
+      })
+    );
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    await screen.findByText('room-a');
+    expect(screen.getByText('room-b')).toBeInTheDocument();
+
+    expect(screen.getByRole('button', { name: 'Show all rooms' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Filter to Catan rooms' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Filter to Scotland Yard rooms' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter to Catan rooms' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms?gameType=catan`);
+      expect(screen.getByRole('button', { name: 'Filter to Catan rooms' })).toHaveAttribute('aria-pressed', 'true');
+    });
+    await screen.findByText('room-b');
+    await waitFor(() => expect(screen.queryByText('room-a')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all rooms' }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(`${API_URL}/rooms`);
+      expect(screen.getByRole('button', { name: 'Show all rooms' })).toHaveAttribute('aria-pressed', 'true');
+    });
+    await waitFor(() => expect(screen.getByText('room-a')).toBeInTheDocument());
+  });
+
+  it('shows a per-game empty state when the filter matches no rooms (Phase 37)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ rooms: [] }) }));
+    render(<Lobby onJoinRoom={onJoinRoom} onSpectate={onSpectate} />);
+
+    await screen.findByText('No public rooms right now. Create one above to appear here.');
+    fireEvent.click(screen.getByRole('button', { name: 'Filter to Scotland Yard rooms' }));
+
+    await screen.findByText('No Scotland Yard rooms right now.');
+    expect(screen.getByText('0 live')).toBeInTheDocument();
   });
 });

@@ -419,11 +419,12 @@ A live directory of public rooms in the Lobby transforms the "join by id" hall i
 ### 🟢 Step 2 (COMPLETE): Lobby browser UI (`packages/web-client/src/components/Lobby.tsx`)
 - 🟢 **Live list:** the Lobby polls `GET /rooms` every 5 s (useEffect + `setInterval`, cleaned up on unmount, silent on server errors). Each entry shows the game badge (color + initial), status pill (Open/Playing/Ended), Hot Seat and N-Bot chips, `roomId · connected/seats taken · open seats` and a live "N watching" tally.
 - 🟢 **Actions:** per-room **Join** (reuses the join flow, disabled/labeled "Full" when `availableSeats === 0`) and **Watch** (reuses the Phase 36 spectate flow). Manual join/spectate inputs now share the same `requestJoin`/`requestSpectate` handlers.
+- 🟢 **Game-type filter:** a pill row (All / Monopoly / Catan / Scotland Yard) above the directory drives the server-side `GET /rooms?gameType=` filter — the poll effect re-fires on filter change, active pill is `aria-pressed`, and a per-game empty state ("No Catan rooms right now.") replaces the default message. Game-selector and filter buttons carry distinct `aria-label`s so the labels stay unambiguous.
 - 🟢 **Visibility toggle:** "List this room in the public browser" checkbox (default on) sends `isPublic` in the `POST /rooms` body; the Lobby container widens to `max-w-xl` for the directory.
-- 🟢 **Testing (TDD):** `Lobby.test.tsx` grew 15 → 19: renders the browser from `GET /rooms` (two rooms with status/bot/hot-seat/watching indicators), joins a listed room, watches a listed room (spectator flow, `onJoinRoom` untouched), and creates a private room when the toggle is unchecked. Existing create-body assertions updated to carry `isPublic: true`.
+- 🟢 **Testing (TDD):** `Lobby.test.tsx` grew 19 → 21: filters to a game type (asserts the `?gameType=catan` fetch, `aria-pressed` on the pill, and the other game's room disappearing), restores the full list on "Show all", and shows the per-game empty state. Existing game-selector clicks moved to the new `Select <Game>` role names.
 
 ### 🟢 Verification (Phase 37)
-- Full suite green (**34 files / 400 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean (pre-existing dep-array warnings only), `@packages/server` + `web-client` production builds pass.
+- Full suite green (**34 files / 402 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean (pre-existing dep-array warnings only), `@packages/server` + `web-client` production builds pass. Extended browser E2E (`ui-tests/rooms-browser.e2e.mjs`) now also proves the game-type filter round-trip: filtering to Catan hides the Monopoly room and restores it on "Show all".
 
 ---
 

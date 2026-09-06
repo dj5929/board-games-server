@@ -42,15 +42,18 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
   const [gameType, setGameType] = useState<GameType>('monopoly');
   const [botCount, setBotCount] = useState<number>(0);
   const [isPublic, setIsPublic] = useState(true);
+  const [roomFilter, setRoomFilter] = useState<'all' | GameType>('all');
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
 
   // Live public-room directory. Polled so the Lobby reflects joiners leaving,
   // games starting, and newly created rooms without a separate push channel.
+  // Re-runs whenever the game-type filter changes (server-side `?gameType=`).
   useEffect(() => {
     let cancelled = false;
+    const query = roomFilter === 'all' ? '' : `?gameType=${roomFilter}`;
     const load = async () => {
       try {
-        const res = await fetch(`${API_URL}/rooms`);
+        const res = await fetch(`${API_URL}/rooms${query}`);
         const data = await res.json();
         if (!cancelled && Array.isArray(data?.rooms)) setRooms(data.rooms as RoomSummary[]);
       } catch {
@@ -63,7 +66,7 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [roomFilter]);
 
   const selectGameType = (type: GameType) => {
     setGameType(type);
@@ -167,18 +170,21 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
         <div className="flex gap-2">
           <button
             onClick={() => selectGameType('monopoly')}
+            aria-label="Select Monopoly"
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'monopoly' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Monopoly
           </button>
           <button
             onClick={() => selectGameType('catan')}
+            aria-label="Select Catan"
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'catan' ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Catan
           </button>
           <button
             onClick={() => selectGameType('scotland-yard')}
+            aria-label="Select Scotland Yard"
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${gameType === 'scotland-yard' ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             Scotland Yard
@@ -246,8 +252,35 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
           <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Open Rooms</span>
           <span className="text-xs text-gray-500">{rooms.length} live</span>
         </div>
+        <div className="flex gap-1.5 flex-wrap" aria-label="Filter public rooms by game">
+          {(['all', 'monopoly', 'catan', 'scotland-yard'] as const).map((type) => {
+            const active = roomFilter === type;
+            return (
+              <button
+                key={type}
+                type="button"
+                aria-pressed={active}
+                aria-label={type === 'all' ? 'Show all rooms' : `Filter to ${GAME_CONFIGS[type].label} rooms`}
+                onClick={() => setRoomFilter(type)}
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
+                  active
+                    ? type === 'all'
+                      ? 'bg-gray-700 text-white'
+                      : GAME_BADGE[type].bg
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {type === 'all' ? 'All' : GAME_CONFIGS[type].label}
+              </button>
+            );
+          })}
+        </div>
         {rooms.length === 0 ? (
-          <p className="text-xs text-gray-500">No public rooms right now. Create one above to appear here.</p>
+          <p className="text-xs text-gray-500">
+            {roomFilter === 'all'
+              ? 'No public rooms right now. Create one above to appear here.'
+              : `No ${GAME_CONFIGS[roomFilter].label} rooms right now.`}
+          </p>
         ) : (
           <ul className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
             {rooms.map((room) => {

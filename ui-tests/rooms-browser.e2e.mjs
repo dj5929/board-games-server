@@ -57,6 +57,14 @@ const clickEnabledButton = async (page, text) =>
     if (el && !el.disabled) { el.click(); return true; }
     return false;
   }, text);
+const clickByAriaLabel = async (page, label) => {
+  const clicked = await page.$$eval('button', (btns, l) => {
+    const el = btns.find((b) => b.getAttribute('aria-label') === l);
+    if (el) { el.click(); return true; }
+    return false;
+  }, label);
+  if (!clicked) throw new Error(`Button with aria-label "${label}" not found`);
+};
 const dismissCardModal = (page) =>
   page.$$eval('button', (btns) => {
     const b = btns.find((x) => x.textContent.trim() === 'OK');
@@ -210,6 +218,20 @@ async function main() {
     }, { label: 'private room to stay out of the directory' });
     if (stillShown.includes(privateRoomId)) throw new Error('Private room leaked into the public browser');
     console.log('   PASS: private room excluded; original public room still listed');
+
+    // -- 7. Game-type filter (server-side ?gameType=) --
+    console.log('8) Filtering the directory by game type in browser #3');
+    await clickByAriaLabel(page3, 'Filter to Catan rooms');
+    await retry(async () => {
+      const t = await bodyText(page3);
+      return t.includes('No Catan rooms right now.') && !t.includes(publicRoomId);
+    }, { label: 'Catan filter to hide the Monopoly room' });
+    console.log('   PASS: Catan filter shows the empty state and hides the Monopoly room');
+    await clickByAriaLabel(page3, 'Show all rooms');
+    await retry(async () => (await bodyText(page3)).includes(publicRoomId), {
+      label: 'Show all filter to restore the directory',
+    });
+    console.log('   PASS: "Show all rooms" restores the full directory');
 
     console.log('\n=== RESULT: PASS ===');
   } finally {

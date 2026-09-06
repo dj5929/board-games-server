@@ -6,7 +6,7 @@ Coverage is measured with **Vitest + `@vitest/coverage-v8`**. Regenerate the rep
 npm run test:cov
 ```
 
-Current baseline: **400 tests / 34 test files passing** (`npm test`). Lint (`npm run lint` + web-client lint) and typecheck (`tsc --noEmit -p tsconfig.json`) are clean.
+Current baseline: **402 tests / 34 test files passing** (`npm test`). Lint (`npm run lint` + web-client lint) and typecheck (`tsc --noEmit -p tsconfig.json`) are clean.
 
 ## Component Summary
 
