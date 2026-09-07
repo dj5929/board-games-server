@@ -1,4 +1,4 @@
-import { Room } from './Room';
+import { Room, generateRoomCode } from './Room';
 import { GAME_CONFIGS, IGameEngine, IGameState, IPlayerAction, IGameEvent, type GameType } from '@packages/engine-core';
 import { RedisStore, redisReviver } from './RedisStore';
 import { PubSubManager } from './PubSubManager';
@@ -155,20 +155,42 @@ export class RoomManager {
 
     // Build all rooms in parallel; the constructor no longer writes the snapshot
     // back (rehydrate path), so no redundant persistence round-trips occur here.
+    //
+    // For legacy snapshots missing a stored invite code, track codes we've
+    // already minted in this batch so we never produce duplicates.
+    const usedCodes = new Set<string>(
+      Array.from(this.codeToRoom.keys()).map((c) => c.trim().toUpperCase())
+    );
     const built = await Promise.allSettled(
       results.map(async ({ data }) => {
         const engine = engines[data.gameType];
         if (!engine) return null;
+        let roomCode = data.roomCode;
+        if (!roomCode) {
+          // Legacy snapshot (pre-Phase-40) with no stored invite code: mint a
+          // fresh one that avoids both live rooms and codes assigned to other
+          // rooms in this same batch, then persist it below so a restart before
+          // any further mutation rehydrates the same code.
+          do {
+            roomCode = generateRoomCode();
+          } while (usedCodes.has(roomCode));
+          usedCodes.add(roomCode);
+        }
         const room = new Room(data.id, data.gameType, engine, { next: () => 0.5 }, [], data.state, {
           isHotSeat: data.isHotSeat === true,
           ownerPlayerId: data.ownerPlayerId ?? null,
           turnTimeLimitMs: data.turnTimeLimitMs ?? 0,
           botSeats: data.botSeats ?? [],
           isPublic: data.isPublic === true,
-          roomCode: data.roomCode
+          roomCode
         });
         room.loadState(data);
         room.setPubSub(this.pubsub);
+        if (!data.roomCode) {
+          // The fresh code lives only in memory so far; write it back now so it
+          // survives a crash before the room's next state mutation.
+          room.saveState();
+        }
         return room;
       })
     );

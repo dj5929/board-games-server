@@ -69,6 +69,13 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
           } else {
              SoundEngine.playVictorySound();
           }
+       } else if (ev.type === 'GAME_RESTARTED') {
+          setGameOver(null);
+          setPendingDoubleMove(null);
+          setIsDoubleMoveActive(false);
+          setNodeInput('');
+          setSelectedTicket('auto');
+          setSkipNotice('');
        }
         }
       } else if (data.type === 'CHAT_HISTORY') {
@@ -159,6 +166,10 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
 
   const handleSendChat = (text: string) => {
     wsRef.current?.send(JSON.stringify({ type: 'CHAT', text }));
+  };
+
+  const handleRematch = () => {
+    dispatch({ type: 'RESTART_GAME', playerId: localPlayerIds[0] });
   };
 
   if (error) {
@@ -380,6 +391,14 @@ export function ScotlandYardRoom({ roomId, localPlayerIds, sessionToken, spectat
               {gameOver.winner === 'MR_X' ? 'Mr. X Wins!' : 'Detectives Win!'}
             </p>
             <p className="text-gray-400 mb-8">{gameOver.reason}</p>
+            {!isSpectator && (
+              <button
+                onClick={handleRematch}
+                className="px-8 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold text-xl w-full mb-3"
+              >
+                Play Again
+              </button>
+            )}
             <button
               onClick={onLeave}
               className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-bold text-xl w-full"

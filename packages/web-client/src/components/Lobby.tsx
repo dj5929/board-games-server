@@ -102,7 +102,7 @@ export function Lobby({ onJoinRoom, onSpectate }: Props) {
   const requestJoin = async (targetId: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/rooms/${targetId}/join`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/rooms/${encodeURIComponent(targetId)}/join`, { method: 'POST' });
       if (res.status === 404) throw new Error('Room not found');
       if (res.status === 400) throw new Error('Room is full');
 

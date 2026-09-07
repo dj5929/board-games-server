@@ -132,6 +132,17 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, r
           } else if (ev.type === 'GAME_OVER') {
             msg = `${ev.winnerId} has won the game!`;
             SoundEngine.playVictorySound();
+          } else if (ev.type === 'GAME_RESTARTED') {
+            msg = 'Rematch started! Board reset.';
+            setEventLog([]);
+            setBuildMode(null);
+            setIsPlayingKnight(false);
+            setIsPlayingRoadBuilding(false);
+            setRoadBuildingEdges([]);
+            setRobberHexId(null);
+            setShowTradeManager(false);
+            setShowDevCardManager(false);
+            setDiceRoll(null);
           } else if (ev.type === 'LONGEST_ROAD_AWARDED') {
             msg = `${ev.playerId} now has the Longest Road (${ev.length} roads)!`;
           } else if (ev.type === 'LARGEST_ARMY_AWARDED') {
@@ -298,6 +309,10 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, r
 
   const handleSendChat = (text: string) => {
     wsRef.current?.send(JSON.stringify({ type: 'CHAT', text }));
+  };
+
+  const handleRematch = () => {
+    wsRef.current?.send(JSON.stringify({ type: 'RESTART_GAME', playerId: localPlayerIds[0] }));
   };
 
   if (error) {
@@ -585,6 +600,14 @@ export function CatanRoom({ roomId, localPlayerIds, sessionToken, spectatorId, r
                 {state.winner}
               </span> has won the game with 10 Victory Points!
             </p>
+            {!isSpectator && (
+              <button
+                onClick={handleRematch}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-transform hover:scale-105 active:scale-95 mr-3"
+              >
+                Play Again
+              </button>
+            )}
             <button 
               onClick={onLeave} 
               className="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-transform hover:scale-105 active:scale-95"

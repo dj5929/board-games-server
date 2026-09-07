@@ -101,6 +101,10 @@ export function GameRoom({ roomId, localPlayerIds, sessionToken, spectatorId, ro
             } else if (ev.type === 'GAME_RESTARTED') {
               msg = `The game was restarted.`;
               setSelectedPropertyId(null);
+              setEventLog([]);
+              setShowTradeManager(false);
+              setShowRestartConfirm(false);
+              setDrawnCard(null);
             } else if (ev.type === 'DICE_ROLLED') {
               const space = BOARD_SPACES.find(s => s.id === BOARD_SPACES[ev.position]?.id);
               msg = `${ev.playerId} rolled a ${ev.dice1 + ev.dice2} and landed on ${space?.name}.`;

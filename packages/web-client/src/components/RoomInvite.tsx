@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export const inviteLink = (code: string) => {
   const url = new URL(window.location.href);
@@ -6,21 +6,32 @@ export const inviteLink = (code: string) => {
   return url.toString();
 };
 
-export const copyText = async (text: string) => {
+export const copyText = async (text: string): Promise<boolean> => {
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch (err) {
     console.error('Failed to copy', err);
+    return false;
   }
 };
 
 export function RoomInvite({ roomCode }: { roomCode: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const handleCopy = async () => {
-    await copyText(inviteLink(roomCode));
+    const ok = await copyText(inviteLink(roomCode));
+    if (!ok) return;
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 1500);
   };
 
   return (

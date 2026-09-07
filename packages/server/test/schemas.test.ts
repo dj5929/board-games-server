@@ -79,6 +79,7 @@ describe('catanActionSchema', () => {
       { type: 'ACCEPT_TRADE' },
       { type: 'REJECT_TRADE' },
       { type: 'CANCEL_TRADE' },
+      { type: 'RESTART_GAME' },
     ];
 
     for (const action of validActions) {
@@ -121,6 +122,11 @@ describe('scotlandYardActionSchema', () => {
   it('parses a valid skip turn action', () => {
     const parsed = scotlandYardActionSchema.parse({ ...base, type: 'SKIP_TURN' });
     expect(parsed.type).toBe('SKIP_TURN');
+  });
+
+  it('parses a valid restart game action', () => {
+    const parsed = scotlandYardActionSchema.parse({ ...base, type: 'RESTART_GAME' });
+    expect(parsed.type).toBe('RESTART_GAME');
   });
 
   it('rejects malformed payloads', () => {

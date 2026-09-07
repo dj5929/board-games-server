@@ -81,6 +81,7 @@ export type ICatanAction = IPlayerAction & (
   | { type: 'ROLL_DICE' }
   | { type: 'END_TURN' }
   | { type: 'FORCE_END_TURN' }
+  | { type: 'RESTART_GAME' }
   // Robber & Discard mechanics
   | { type: 'DISCARD_RESOURCES'; resources: Record<Exclude<ResourceType, 'DESERT'>, number> }
   | { type: 'MOVE_ROBBER'; hexId: string; targetPlayerId?: PlayerId }
@@ -124,6 +125,7 @@ export type ICatanEvent = IGameEvent & (
   | { type: 'TRADE_REJECTED'; tradeId: string }
   | { type: 'TRADE_CANCELLED'; tradeId: string }
   | { type: 'GAME_OVER'; winnerId: PlayerId }
+  | { type: 'GAME_RESTARTED' }
   | { type: 'LONGEST_ROAD_AWARDED'; playerId: PlayerId; length: number }
   | { type: 'LARGEST_ARMY_AWARDED'; playerId: PlayerId; size: number }
 );

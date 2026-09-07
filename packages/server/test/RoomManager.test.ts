@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RoomManager } from '../src/RoomManager';
 import { Room } from '../src/Room';
+import { RedisStore, redisReplacer } from '../src/RedisStore';
 import { MonopolyEngine } from '@packages/monopoly-engine';
 
 function makeRoom(id: string, isHotSeat = false) {
@@ -245,6 +246,43 @@ describe('RoomManager', () => {
 
     expect(manager.getRoom('restore-code')?.roomCode).toBe('SHARE1');
     expect(manager.getRoomByCode('share1')).toBeDefined();
+    manager.stopCleanup();
+  });
+
+  it('mints and persists fresh codes for legacy snapshots missing one (Phase 40 fix)', async () => {
+    // Simulate a pre-Phase-40 snapshot (constructor-written, no roomCode).
+    makeRoom('legacy-a');
+    makeRoom('legacy-b');
+    const rawA = await RedisStore.get('room:legacy-a');
+    const rawB = await RedisStore.get('room:legacy-b');
+    const legacyA = JSON.parse(rawA!);
+    const legacyB = JSON.parse(rawB!);
+    delete legacyA.roomCode;
+    delete legacyB.roomCode;
+    await RedisStore.set('room:legacy-a', JSON.stringify(legacyA, redisReplacer));
+    await RedisStore.set('room:legacy-b', JSON.stringify(legacyB, redisReplacer));
+
+    const manager = new RoomManager();
+    await manager.initFromRedis({ monopoly: MonopolyEngine } as any);
+
+    const restoredA = manager.getRoom('legacy-a');
+    const restoredB = manager.getRoom('legacy-b');
+    expect(restoredA).toBeDefined();
+    expect(restoredB).toBeDefined();
+    // Valid unambiguous-alphabet code, unique within the rehydrated batch.
+    expect(restoredA?.roomCode).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+    expect(restoredB?.roomCode).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+    expect(restoredB?.roomCode).not.toBe(restoredA?.roomCode);
+
+    // The freshly minted code is persisted immediately so a crash before the
+    // room's next mutation rehydrates the same code rather than re-minting.
+    const storedA = JSON.parse((await RedisStore.get('room:legacy-a'))!);
+    const storedB = JSON.parse((await RedisStore.get('room:legacy-b'))!);
+    expect(storedA.roomCode).toBe(restoredA?.roomCode);
+    expect(storedB.roomCode).toBe(restoredB?.roomCode);
+
+    await RedisStore.del('room:legacy-a');
+    await RedisStore.del('room:legacy-b');
     manager.stopCleanup();
   });
 });

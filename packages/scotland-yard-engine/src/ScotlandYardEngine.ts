@@ -82,6 +82,8 @@ export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardActi
   },
 
   isValidAction(currentState: Readonly<ScotlandYardState>, action: Readonly<ScotlandYardAction>): boolean {
+    // Rematch is always legal (works from any seat and even after game over).
+    if (action.type === 'RESTART_GAME') return true;
     if (currentState.status !== 'IN_PROGRESS') return false;
 
     // MED-7: assert action.playerId matches the active player for MOVE/DOUBLE_MOVE
@@ -125,7 +127,15 @@ export const ScotlandYardEngine: IGameEngine<ScotlandYardState, ScotlandYardActi
     return false;
   },
 
-  reduce(currentState: Readonly<ScotlandYardState>, action: Readonly<ScotlandYardAction>, _rng: IRandomProvider): Result<IStateTransition<ScotlandYardState, ScotlandYardEvent>, string> {
+  reduce(currentState: Readonly<ScotlandYardState>, action: Readonly<ScotlandYardAction>, rng: IRandomProvider): Result<IStateTransition<ScotlandYardState, ScotlandYardEvent>, string> {
+    // Rematch: rebuild a fresh game from the same seat order (Mr. X keeps index
+    // 0). Handled before the status guard so it works after the game has ended.
+    if (action.type === 'RESTART_GAME') {
+      const playerIds = currentState.playerOrder;
+      const resetState = ScotlandYardEngine.getInitialState(playerIds, rng);
+      return { success: true, data: { nextState: resetState, events: [{ type: 'GAME_RESTARTED' }] } };
+    }
+
     if (currentState.status !== 'IN_PROGRESS') {
       return { success: false, error: 'Game is over.' };
     }

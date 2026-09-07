@@ -53,6 +53,7 @@ export const catanActionSchema = z.discriminatedUnion('type', [
   z.object({ ...baseAction, type: z.literal('ROLL_DICE') }),
   z.object({ ...baseAction, type: z.literal('END_TURN') }),
   z.object({ ...baseAction, type: z.literal('FORCE_END_TURN') }),
+  z.object({ ...baseAction, type: z.literal('RESTART_GAME') }),
 ]);
 
 export const scotlandYardActionSchema = z.discriminatedUnion('type', [
@@ -62,6 +63,7 @@ export const scotlandYardActionSchema = z.discriminatedUnion('type', [
     move2: z.object({ targetNode: z.number(), ticketType: z.string() })
   }) }),
   z.object({ ...baseAction, type: z.literal('SKIP_TURN') }),
+  z.object({ ...baseAction, type: z.literal('RESTART_GAME') }),
 ]);
 
 export const actionSchemaByGame: Record<GameType, z.ZodType> = {

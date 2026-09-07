@@ -490,7 +490,29 @@ Players can now invite friends to specific rooms via 6-character short codes and
 - **Testing (TDD):** `Lobby.test.tsx` (auto-joins/spectates via query parameters, successfully resolves the `roomCode` property on mocked API responses).
 
 ### 🟢 Verification (Phase 40)
-- Full suite green (**36 files / 439 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean, `@packages/server` + `web-client` production builds pass.
+- Full suite green (**40 files / 454 tests**), root `tsc` typecheck clean, root + `web-client` oxlint clean, `@packages/server` + `web-client` production builds pass.
+- Phase 40 follow-up fixes: `RoomInvite.tsx` clipboard handling now returns a boolean and only shows "Copied!" on success (with unmount timer cleanup), `Lobby.tsx` `requestJoin` now `encodeURIComponent`s the target ID for parity with `requestSpectate`, and `RoomManager.initFromRedis` mints collision-free codes for legacy snapshots lacking one (and persists them immediately). Covered by new tests in `RoomManager.test.ts` and a `RoomInvite.test.tsx` clipboard-failure case.
+
+## 🟢 Rematch / Play Again (Phase 41)
+
+Every game can now be restarted in-place (same room, same seats, invites, bot seats, chat history all preserved) with a single "Play Again" button on the game-over screen. The engine resets to a fresh `getInitialState(...)` while keeping the same player order, so roles are preserved (Mr. X stays Mr. X, etc.).
+
+### 🟢 Engines (RESTART_GAME)
+- **Catan** (`packages/catan-engine`): new `RESTART_GAME` action + `GAME_RESTARTED` event. `CatanEngine.reduce` short-circuits to a fresh state (clears resources/roads/VP, resets `turnPhase` to `INITIAL_PLACEMENT_1`, dev-card deck, robber, winner) via a first `case 'RESTART_GAME'`; `isValidAction` allows it from any seat, including after `FINISHED`.
+- **Scotland Yard** (`packages/scotland-yard-engine`): new `RESTART_GAME` action + `GAME_RESTARTED` event. `ScotlandYardEngine.reduce` resets tickets/positions/`currentTurn`/`mrXLog`/roles before the not-`IN_PROGRESS` guard (so it works after game over); `isValidAction` allows it from any seat.
+- **Monopoly** (already supported): `GameRoom.tsx` now also clears its event log, trade manager, restart confirm, and drawn-card modal on `GAME_RESTARTED`.
+- **Testing (TDD):** `restart.test.ts` in both `catan-engine` and `scotland-yard-engine` (fresh-state reset with players preserved, any-seat validity, post-`FINISHED` acceptance).
+
+### 🟢 Server (`packages/server/src`)
+- **Schemas:** `RESTART_GAME` whitelisted in `catanActionSchema` and `scotlandYardActionSchema` (`schemas.test.ts` extended to cover both).
+
+### 🟢 Client (`packages/web-client/src/components`)
+- **`CatanRoom.tsx`:** "Play Again" button on the victory overlay (hidden for spectators) dispatching `{ type: 'RESTART_GAME', playerId }`; `GAME_RESTARTED` handler clears the event log/build mode/knight & road-building/discard/trade/dev-card/robber/dice state.
+- **`ScotlandYardRoom.tsx`:** "Play Again" button on the game-over overlay (hidden for spectators); `GAME_RESTARTED` handler clears the local `gameOver` overlay, node input, double-move state and skip notice — without it the overlay would stick after a rematch.
+- **Testing (TDD):** `CatanRoom.test.tsx` + `ScotlandYardRoom.test.tsx` (Play Again dispatches `RESTART_GAME`, restart events clear logs/overlays, spectators never see the button).
+
+### 🟢 Verification (Phase 41)
+- Full suite green (**40 files / 454 tests**), root + web-client typechecks clean, root + web-client oxlint clean (only pre-existing warnings), `@packages/server` + `web-client` production builds pass.
 
 ## 🔮 Future Additions (Post-MVP)
 

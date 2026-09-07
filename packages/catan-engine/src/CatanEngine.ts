@@ -264,6 +264,14 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
     const events: ICatanEvent[] = [];
 
     switch (action.type) {
+      case 'RESTART_GAME': {
+        // Rematch: rebuild a fresh game from the same player order. Short-circuits
+        // before any board mutation, so it also works right after game over.
+        const playerIds = nextState.players.map(p => p.id);
+        const resetState = CatanEngine.getInitialState(playerIds, rng);
+        return { success: true, data: { nextState: resetState, events: [{ type: 'GAME_RESTARTED' }] } };
+      }
+
       case 'ROLL_DICE': {
         if (action.playerId !== currentState.activePlayerId) return { success: false, error: 'Not your turn' };
         if (currentState.turnPhase !== 'MAIN_TURN') return { success: false, error: 'Cannot roll now' };
@@ -963,6 +971,8 @@ export const CatanEngine: IGameEngine<ICatanState, ICatanAction, ICatanEvent> = 
   },
 
   isValidAction(currentState: Readonly<ICatanState>, action: Readonly<ICatanAction>): boolean {
+    // Rematch is always legal (works from any seat and even after game over).
+    if (action.type === 'RESTART_GAME') return true;
     if (currentState.status === 'FINISHED') return false;
     
     // DISCARD_RESOURCES can be sent by any player who needs to discard
